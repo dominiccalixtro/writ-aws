@@ -1,0 +1,40 @@
+.aws/
+credentials
+
+.lab/
+
+# Secrets / local environment
+.env
+.env.local
+
+# Decision records and run artifacts (regenerated per run, machine-specific)
+.runs/
+
+# Terraform state and provider caches (never committed; sandbox is ephemeral)
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+*.tfplan
+terraform/bootstrap/.terraform/
+terraform.tfvars
+*.auto.tfvars
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local agent/tool runtime state (not part of the repository contract)
+.agentsroom/
+.mcp.json
+.claude/settings.local.json
+
+# IDE / editor state
+.vscode/
+.idea/
+
+# Local logs
+*.log

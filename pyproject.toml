@@ -1,0 +1,11 @@
+[project]
+name = "writ-aws"
+version = "0.1.0"
+description = "Deny-by-default admission broker for AI-proposed AWS remediations"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+writ = "writ.cli:main"
