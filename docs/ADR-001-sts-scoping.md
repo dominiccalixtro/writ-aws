@@ -263,17 +263,24 @@ This ADR prompted two amendments to `docs/IMPLEMENTATION_PLAN.md`:
 
 ### Phase 0 is incomplete
 
-Phase 0–2 *code* scaffolding is done. Phase 0 on the AWS side is not. The lab exercise
-recorded above is preparatory verification and satisfies **no** A0 criterion. All five
-remain outstanding:
+Phase 0–2 *code* scaffolding is done. Phase 0 on the AWS side is partially done. The
+lab exercise recorded above is preparatory verification and satisfies **no** A0
+criterion — that remains true. What has changed since this ADR was first written is
+that `terraform/bootstrap/` has been written and applied, which satisfies A0.1 and made
+A0.3 verifiable.
 
-| Criterion | Outstanding work |
+Status only; the evidence is in `docs/RUNBOOK.md`.
+
+| Criterion | Status |
 |---|---|
-| **A0.1** | Sandbox account exists as an Organization member with the broker role defined only there. No broker role has been created. |
-| **A0.2** | `terraform plan` on `terraform/bootstrap/` clean from a fresh clone. The module is empty; no Terraform has been written. |
-| **A0.3** | Every deny in §4.2.3 verified by `aws iam simulate-principal-policy`, with output recorded. Not run. |
-| **A0.4** | Quash exercised once, result recorded in `docs/RUNBOOK.md`. Not exercised. |
-| **A0.5** | Budget alarms exist and confirmed to fire on a test threshold. Not confirmed. |
+| **A0.1** | **Satisfied** — the broker role exists in the sandbox account and nowhere else. |
+| **A0.2** | Outstanding — fresh-clone `terraform plan` not yet performed. |
+| **A0.3** | **Satisfied**, with two recorded limitations: a wildcard deny cannot be exhaustively verified by `simulate-principal-policy`, which requires concrete action names; and the boundary-escape deny emits no statement while `capability_role_arns` is empty, so there is nothing to simulate. |
+| **A0.4** | Outstanding — quash not yet exercised. |
+| **A0.5** | Partial — alarms exist; firing unconfirmed; the sandbox budget's linked-account filter is incorrect. |
+
+I9 remains unverified for the same reason as A0.3's second limitation, and is a Phase 3
+dependency: it must be checked when `capability_role_arns` is first populated.
 
 ## Open questions
 
