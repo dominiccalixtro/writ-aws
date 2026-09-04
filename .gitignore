@@ -12,7 +12,6 @@ credentials
 
 # Terraform state and provider caches (never committed; sandbox is ephemeral)
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfstate.backup
