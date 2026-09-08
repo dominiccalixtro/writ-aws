@@ -6,10 +6,11 @@ exercised, per sec. 4.3.3 and acceptance A0.4.
 
 ## Quash
 
-Not yet exercised. Section 4.3 requires the SCP-based quash path to be
+Exercised 2026-09-04. Section 4.3 requires the SCP-based quash path to be
 exercised at least once during Phase 0, with the result recorded here:
 command run, timestamp, and confirmation that the broker role lost all
-access (e.g. an `AccessDenied` on a call that succeeded before quash).
+access (e.g. an `AccessDenied` on a call that succeeded before quash). The
+record is under **A0.4 — quash exercised** below.
 
 ### Pre-flight before attempting A0.4
 
@@ -33,7 +34,8 @@ aws organizations enable-policy-type \
   --profile writ-management
 ```
 
-Free. Without it, the `attach-policy` step of A0.4 fails.
+Free. Without it, the `attach-policy` step of A0.4 fails. Confirmed
+`ENABLED` on root `r-zg8s` before the A0.4 exercise.
 
 ## Fixture capture
 
@@ -182,6 +184,78 @@ independent ways:
 
 Any one of the three would be sufficient alone.
 
+## A0.2 — fresh-clone plan
+
+- **Date:** 2026-09-04
+- **Status:** satisfied
+- **Cost:** free.
+
+### Interpretation applied
+
+A0.2 requires `terraform plan` to be "clean from a fresh clone." With state and
+tfvars both gitignored, a fresh clone has neither, so plan necessarily reports
+all resources as to-be-created rather than "no changes."
+
+The reading applied: **plan runs without error given a valid tfvars file** —
+every `.tf` parses, every variable type-checks, all policy JSON is constructed,
+and the provider resolves from the committed lock file. It is a
+structural-validity criterion, not a drift-detection one.
+
+### Results
+
+Fresh clone of `origin/main` into a temporary directory, real tfvars copied in:
+
+- `terraform init` — resolved `hashicorp/aws v6.62.0` from
+  `.terraform.lock.hcl`, not the latest available 6.x. This is what tracking the
+  lock file buys: the fresh clone plans against the same provider the module was
+  validated with.
+- `terraform plan` — `4 to add, 0 to change, 0 to destroy`. No errors, no
+  warnings.
+
+The temporary clone and the copied tfvars were deleted afterwards.
+
+### Two defects this run surfaced
+
+**1. Uncommitted Terraform.** The first attempt emitted:
+
+```
+Warning: Value for undeclared variable
+The root module does not declare a variable named "enable_quash_test_permission"
+but a value was found in file "terraform.tfvars".
+```
+
+The A0.4 gate existed in the working tree but had never been committed. The
+module in git could neither reproduce nor explain the exercise that had just
+been run. Terraform treats undeclared variables in tfvars as a warning rather
+than an error, so nothing failed loudly.
+
+Worth generalising: reverting a tfvars value is not the same as committing the
+`.tf` changes that made it meaningful.
+
+**2. Broken `terraform.tfvars.example`.** The example file omitted several
+declared variables and assigned `capability_role_arns = ""` where a
+`list(string)` is required. Any fresh clone using the example — its only
+purpose — would have failed on a type error.
+
+This went unnoticed because the A0.2 run copied the operator's *real* tfvars
+rather than the example. The test skipped the file it was meant to validate.
+
+Both were fixed and committed before the run recorded above.
+
+### Note on a dangerous pattern
+
+While validating the corrected example, `terraform plan -var-file=...` was run
+inside the live working directory. Terraform read the existing state, compared
+it against placeholder account IDs, and proposed rewriting the live quash SCP to
+reference `arn:aws:iam::123456789012:role/writ-broker` — pointing the kill
+switch at a role in an account that does not exist, while leaving it looking
+correctly configured.
+
+Not applied. Recorded because Terraform gives no warning in this situation; the
+diff appears as an ordinary in-place update. **Validating alternative variable
+files requires a directory with no state**, not a `-var-file` override in the
+live one.
+
 ## A0.3 — sec. 4.2.3 denies verified by simulation
 
 - **Date:** 2026-09-04
@@ -287,6 +361,156 @@ which would permanently block Phase 3.
 
 Recorded as a Phase 3 dependency. This deny must be verified when
 `capability_role_arns` is first populated.
+
+## A0.4 — quash exercised
+
+- **Date:** 2026-09-04
+- **Status:** satisfied
+- **Cost:** free. IAM, STS, SCPs, and `ListAllMyBuckets` are all unbilled.
+
+### Pre-flight
+
+`SERVICE_CONTROL_POLICY` confirmed `ENABLED` on root `r-zg8s` before starting,
+per the procedure under Quash above. Creating an SCP and attaching one are
+different operations; attachment requires the policy type to be enabled, which
+is not automatic even in all-features mode. This was not verified before the
+original `terraform apply`, and the SCP creation succeeding gave no signal
+either way.
+
+### Why a temporary permission was required
+
+At rest in Phases 0–2 the broker role is assumable by nobody and holds zero
+permissions. Attaching the quash SCP in that state produces no observable
+change — denied before, denied after — which demonstrates nothing about the SCP.
+
+Section 4.3.3 requires quash to be *exercised*, not merely to exist. Exercising
+it requires something for it to remove.
+
+### The bracketed deviation
+
+Gated behind `enable_quash_test_permission` (bool, default `false`), added to
+`terraform/bootstrap/`. A variable rather than a temporary file edit: a tfvars
+flip cannot be accidentally committed, and the switch documents its own
+constraints.
+
+With the flag on and `broker_trusted_principal_arns` populated with the
+operator's Identity Center admin role, three things changed:
+
+| | At rest | During the exercise |
+|---|---|---|
+| Trust policy | `Deny` on `Principal: *` | `Allow` on the operator's SSO role |
+| Permissions boundary | No `Allow` statement | `s3:ListAllMyBuckets` on `*` |
+| Identity policy | Not created (`count = 0`) | Created, granting the same |
+
+`s3:ListAllMyBuckets` returns bucket names only. It reads no object data and
+mutates nothing.
+
+**SSO role ARN gotcha:** the trust policy requires the *role* ARN, which for
+Identity Center roles includes a path segment that `get-caller-identity` does
+not display. The session ARN shows
+`assumed-role/AWSReservedSSO_AdministratorAccess_<hash>/<user>`, but the role
+ARN is
+`arn:aws:iam::<sandbox-account-id>:role/aws-reserved/sso.amazonaws.com/ap-southeast-1/AWSReservedSSO_AdministratorAccess_<hash>`.
+Retrieved via `aws iam get-role`. Using the ARN without the path is accepted by
+IAM as a valid policy but never matches, producing an `AccessDenied` with no
+indication of the cause.
+
+### Sequence and results
+
+**1. Assumed the broker role.** Session identity confirmed as
+`arn:aws:sts::<sandbox-account-id>:assumed-role/writ-broker/a04-quash-test`.
+
+**2. `aws s3api list-buckets` — succeeded.** Returned the two STS lab buckets.
+This is the before-state.
+
+**3. Attached the quash SCP** from a separate terminal using the management
+profile. The broker's exported session credentials cannot make this call: sec.
+4.2.3 denies the broker `organizations:*`, and the policy lives in an account
+the broker has no access to.
+
+```bash
+aws organizations attach-policy \
+  --policy-id p-mphj9kb6 \
+  --target-id ou-zg8s-xkkyz4wh \
+  --profile writ-management
+```
+
+**4. `aws s3api list-buckets` — denied.** Same session, same credentials, no
+change to any policy in the sandbox account:
+
+```
+An error occurred (AccessDenied) when calling the ListBuckets operation:
+User: arn:aws:sts::<sandbox-account-id>:assumed-role/writ-broker/a04-quash-test
+is not authorized to perform: s3:ListAllMyBuckets with an explicit deny in a
+service control policy:
+arn:aws:organizations::<management-account-id>:policy/o-th9tld0ono/service_control_policy/p-mphj9kb6
+```
+
+This is the evidence for sec. 4.3.2. The denial names the service control policy
+by ARN and attributes it to the management account. Nothing in the sandbox
+changed between steps 2 and 4; the broker was cut off from outside its own
+account by a policy it cannot read, modify, or detach.
+
+**5. Detached the SCP.**
+
+**6. `aws s3api list-buckets` — succeeded again.** Confirms quash is reversible
+and that the denial in step 4 came from the SCP rather than from an unrelated
+change.
+
+### Revert
+
+- `enable_quash_test_permission` set back to `false`
+- `broker_trusted_principal_arns` set back to `[]`
+- `terraform apply` — 0 to add, 2 to change, 1 to destroy, the exact mirror of
+  the forward plan
+- `terraform plan` — **no changes**, confirming configuration and infrastructure
+  agree
+
+Independently verified against AWS rather than against Terraform state:
+
+```bash
+aws organizations list-policies-for-target \
+  --target-id ou-zg8s-xkkyz4wh \
+  --filter SERVICE_CONTROL_POLICY \
+  --profile writ-management
+```
+
+Returned `FullAWSAccess` only. The quash policy is detached.
+
+```bash
+aws sts assume-role \
+  --role-arn arn:aws:iam::<sandbox-account-id>:role/writ-broker \
+  --role-session-name post-revert-check \
+  --profile writ-sandbox
+```
+
+Returned `AccessDenied` — the trust policy is back to denying all principals.
+
+### Prediction that proved wrong
+
+The quash SCP matches on `aws:PrincipalArn` using `ArnEquals` against the
+broker's role ARN. It was anticipated that `aws:PrincipalArn` might resolve to
+the assumed-role *session* ARN (`arn:aws:sts::...:assumed-role/writ-broker/<session>`)
+rather than the role ARN, in which case `ArnEquals` would never match and the
+SCP would silently fail to deny. The planned fix was switching the condition to
+`ArnLike` with a wildcard.
+
+It did not occur. `aws:PrincipalArn` resolved to the role ARN and the condition
+matched on the first attempt. **No change to the SCP was needed.** Recorded
+because the alternative is plausible enough to be worth ruling out explicitly
+rather than rediscovering.
+
+### Denial reasons observed across the project
+
+Four distinct denial messages have now been seen, each naming a different
+enforcement layer. Useful as a diagnostic vocabulary:
+
+| Message | Layer |
+|---|---|
+| `because no session policy allows...` | Session policy narrower than the role |
+| `because no identity-based policy allows...` | Role narrower than the session policy |
+| `implicitDeny` (simulation) | Nothing allows it; no deny statement matched |
+| `with an explicit deny in a service control policy` | Organizations SCP |
 
 ## A0.5 — budget alarms
 

@@ -267,16 +267,17 @@ Phase 0–2 *code* scaffolding is done. Phase 0 on the AWS side is partially don
 lab exercise recorded above is preparatory verification and satisfies **no** A0
 criterion — that remains true. What has changed since this ADR was first written is
 that `terraform/bootstrap/` has been written and applied, which satisfies A0.1 and made
-A0.3 verifiable.
+A0.3 verifiable; A0.2 and A0.4 have since been satisfied in turn. A0.5 alone remains
+partial, so Phase 0 is not yet complete.
 
 Status only; the evidence is in `docs/RUNBOOK.md`.
 
 | Criterion | Status |
 |---|---|
 | **A0.1** | **Satisfied** — the broker role exists in the sandbox account and nowhere else. |
-| **A0.2** | Outstanding — fresh-clone `terraform plan` not yet performed. |
+| **A0.2** | **Satisfied** — `terraform plan` runs without error from a fresh clone of `origin/main` given a valid tfvars file, resolving the provider from the committed lock file. Read as a structural-validity criterion rather than a drift check: state and tfvars are both gitignored, so a fresh clone necessarily plans every resource as to-be-created. |
 | **A0.3** | **Satisfied**, with two recorded limitations: a wildcard deny cannot be exhaustively verified by `simulate-principal-policy`, which requires concrete action names; and the boundary-escape deny emits no statement while `capability_role_arns` is empty, so there is nothing to simulate. |
-| **A0.4** | Outstanding — quash not yet exercised. |
+| **A0.4** | **Satisfied** — quash exercised end to end. A call that succeeded before the SCP was attached returned an explicit deny naming the service control policy afterwards, with nothing in the sandbox account changed in between, and succeeded again once detached. Required a bracketed and since-reverted grant of `s3:ListAllMyBuckets`, because a role with zero permissions at rest shows no observable change under quash. |
 | **A0.5** | Partial — alarms exist; firing unconfirmed; the sandbox budget's linked-account filter is incorrect. |
 
 I9 remains unverified for the same reason as A0.3's second limitation, and is a Phase 3
