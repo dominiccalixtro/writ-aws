@@ -91,7 +91,7 @@ modern buckets than on legacy ones.
 
 **Cross-reference:** `docs/ADR-001-sts-scoping.md`.
 
-### Lab teardown — pending operator action
+### Lab teardown — complete
 
 The lab created four resources in the sandbox from the CLI. They are **not**
 managed by Terraform, so `terraform destroy` will not remove them. Leaving them
@@ -105,7 +105,7 @@ S3 bucket  writ-lab-alpha-<sandbox-account-id>
 S3 bucket  writ-lab-beta-<sandbox-account-id>
 ```
 
-Deletions have **not** been run. The operator executes them:
+Deletions were run 2026-09-09. Commands kept for reference:
 
 ```bash
 # Set ACCT to the sandbox account ID before running.
@@ -122,8 +122,10 @@ aws s3api delete-bucket --bucket writ-lab-alpha-$ACCT --profile writ-sandbox
 aws s3api delete-bucket --bucket writ-lab-beta-$ACCT --profile writ-sandbox
 ```
 
-Record the completion date here once run, and confirm no lab resource remains
-(`aws iam list-roles`, `aws s3api list-buckets`).
+Completed 2026-09-09. `writ-lab-narrow` and `writ-lab-broad` were deleted with
+their inline policies, and the `writ-lab-alpha-*` and `writ-lab-beta-*` buckets
+were deleted. Verified by `aws iam list-roles` and `aws s3 ls`, both returning
+no `writ-lab-*` resource.
 
 ## Organization structure change
 
@@ -523,7 +525,7 @@ enforcement layer. Useful as a diagnostic vocabulary:
 |---|---|---|---|
 | My Monthly Cost Budget | Org-wide | $10 | Actual |
 | My Zero-Spend Budget | Org-wide | $1 | Actual |
-| Sandbox Zero Budget | **Filter incorrect — see below** | $1 | Actual |
+| Sandbox Zero Budget | Sandbox account only | $1 | Actual |
 
 All notify the operator's primary personal email address, verified as monitored.
 
@@ -545,7 +547,7 @@ real spend in this project. That is a stronger test than an artificial one:
 enabling AWS Config and Security Hub exercises the alarm against exactly the
 spend it exists to catch.
 
-### Open defect — sandbox budget filter
+### Resolved defect — sandbox budget filter
 
 "Sandbox Zero Budget" was created in the management account but its
 linked-account filter was set to `<management-account-id>` rather than
@@ -553,19 +555,25 @@ linked-account filter was set to `<management-account-id>` rather than
 and the default was accepted.
 
 The budget name said "Sandbox"; the filter did not. Confirmed by a forecast of
-$0.876, matching the org-wide budget rather than the sandbox's $0 history.
+$0.876 on 2026-09-04, matching the org-wide budget rather than the sandbox's $0
+history.
 
-**Cannot currently be corrected.** The linked-account picker is populated from
-billing data, and the sandbox account has generated no billing records since
-creation, so it does not yet appear as a selectable value. Expected to resolve
-within roughly 24 hours of account creation, or once the account generates its
-first charge.
+**Corrected 2026-09-09.** The linked-account filter now lists
+`<sandbox-account-id>` only; `<management-account-id>` removed. The picker had
+not previously offered the sandbox account because it had generated no billing
+records; that lag resolved.
 
-**Action required before Phase 1 Stage 2:** correct the filter and verify via
-`aws budgets describe-budgets`, confirming `CostFilters` contains
-`LinkedAccount: ["<sandbox-account-id>"]`. The alarm must be correct **before**
-detection services are enabled, per sec. 4.4.1.
+A0.5 remains **Partial**. The alarm is now correctly configured but has not
+fired, because sandbox spend is $0. Firing will be confirmed during Phase 1
+fixture capture, per the subsection above.
 
-Note: `CostFilters` was absent from CLI output even when a filter was configured
-in the console. Absence of that field is not reliable evidence of an unfiltered
-budget; the console is authoritative.
+### Verification caveat — `CostFilters` is not evidence
+
+`CostFilters` is absent from both `describe-budgets` and `describe-budget`
+output even when a linked-account filter is correctly applied. **Do not treat an
+empty `CostFilters` as evidence that a budget is unscoped.**
+
+Verify scope in the console, or by the presence or absence of `ForecastedSpend`:
+a correctly-scoped budget on an account with no spend history omits the forecast
+entirely. Before the fix the forecast read $0.692, matching the management
+account's baseline; after it, the field is absent.

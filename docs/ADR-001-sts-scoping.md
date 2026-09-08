@@ -278,7 +278,7 @@ Status only; the evidence is in `docs/RUNBOOK.md`.
 | **A0.2** | **Satisfied** — `terraform plan` runs without error from a fresh clone of `origin/main` given a valid tfvars file, resolving the provider from the committed lock file. Read as a structural-validity criterion rather than a drift check: state and tfvars are both gitignored, so a fresh clone necessarily plans every resource as to-be-created. |
 | **A0.3** | **Satisfied**, with two recorded limitations: a wildcard deny cannot be exhaustively verified by `simulate-principal-policy`, which requires concrete action names; and the boundary-escape deny emits no statement while `capability_role_arns` is empty, so there is nothing to simulate. |
 | **A0.4** | **Satisfied** — quash exercised end to end. A call that succeeded before the SCP was attached returned an explicit deny naming the service control policy afterwards, with nothing in the sandbox account changed in between, and succeeded again once detached. Required a bracketed and since-reverted grant of `s3:ListAllMyBuckets`, because a role with zero permissions at rest shows no observable change under quash. |
-| **A0.5** | Partial — alarms exist; firing unconfirmed; the sandbox budget's linked-account filter is incorrect. |
+| **A0.5** | Partial — alarms exist and are correctly configured; firing unconfirmed, because sandbox spend is $0. |
 
 I9 remains unverified for the same reason as A0.3's second limitation, and is a Phase 3
 dependency: it must be checked when `capability_role_arns` is first populated.
@@ -310,9 +310,10 @@ dependency: it must be checked when `capability_role_arns` is first populated.
 ## Lab teardown
 
 Sandbox resources created for this ADR. All four were created from the CLI and are
-**not** managed by Terraform, so `terraform destroy` will not remove them. They are
-**scheduled for deletion, pending operator action** — leaving them creates untracked
-drift in an account A1.4 expects to be clean, and `writ-lab-broad` grants `s3:*`.
+**not** managed by Terraform, so `terraform destroy` would not have removed them. They
+were **deleted 2026-09-09 and verified absent** — leaving them would have created
+untracked drift in an account A1.4 expects to be clean, and `writ-lab-broad` granted
+`s3:*`.
 
 ```
 IAM role   writ-lab-narrow  (inline policy: narrow)
@@ -321,8 +322,7 @@ S3 bucket  writ-lab-alpha-<account-id>
 S3 bucket  writ-lab-beta-<account-id>
 ```
 
-The exact teardown commands are recorded in `docs/RUNBOOK.md`. They have not been
-run; the operator executes them.
+The exact teardown commands and the completion record are in `docs/RUNBOOK.md`.
 
 Scratch policy JSON lives in `.lab/`, which is gitignored. `broad-policy.json`
 grants `s3:*` and must never be committed — it contradicts the implementation
