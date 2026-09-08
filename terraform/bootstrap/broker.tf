@@ -143,6 +143,18 @@ data "aws_iam_policy_document" "broker_boundary" {
       not_resources = var.capability_role_arns
     }
   }
+
+    # A0.4 only. Gated off by default.
+  dynamic "statement" {
+    for_each = var.enable_quash_test_permission ? [1] : []
+
+    content {
+      sid       = "QuashTestPermission"
+      effect    = "Allow"
+      actions   = ["s3:ListAllMyBuckets"]
+      resources = ["*"]
+    }
+  }
 }
 
 # The boundary as a managed policy. A permissions boundary must be a
@@ -180,10 +192,21 @@ data "aws_iam_policy_document" "broker_identity" {
       resources = var.capability_role_arns
     }
   }
+
+   dynamic "statement" {
+    for_each = var.enable_quash_test_permission ? [1] : []
+
+    content {
+      sid       = "QuashTestPermission"
+      effect    = "Allow"
+      actions   = ["s3:ListAllMyBuckets"]
+      resources = ["*"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "broker_identity" {
-  count = length(var.capability_role_arns) > 0 ? 1 : 0
+  count = length(var.capability_role_arns) > 0 || var.enable_quash_test_permission ? 1 : 0
 
   name   = "${var.broker_role_name}-identity"
   role   = aws_iam_role.broker.id

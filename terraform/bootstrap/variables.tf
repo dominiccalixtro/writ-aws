@@ -59,3 +59,16 @@ variable "broker_trusted_principal_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "enable_quash_test_permission" {
+  description = <<-EOT
+    Temporarily grants the broker s3:ListAllMyBuckets and makes the role
+    assumable, solely to exercise quash for A0.4. Without it the broker has
+    zero permissions and is assumable by nobody, so there is nothing for
+    quash to take away and no observable difference to record.
+
+    MUST be false outside that exercise. See docs/RUNBOOK.md.
+  EOT
+  type        = bool
+  default     = false
+}
