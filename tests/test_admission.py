@@ -26,7 +26,7 @@ class AdmissionResourceScopeTests(unittest.TestCase):
     def test_arn_outside_sandbox_account_is_refused(self) -> None:
         """invariant I5."""
 
-    @unittest.skip("sec. 7 not yet implemented")
+    @unittest.skip("sec. 7.3 tag check deferred to Phase 3 — requires an AWS read")
     def test_arn_missing_sandbox_tag_is_refused(self) -> None:
         """sec. 7.3."""
 

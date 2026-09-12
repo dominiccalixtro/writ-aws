@@ -145,6 +145,10 @@ ASFF finding (untrusted)
 
 7.3. Every target resource ARN SHALL be verified to reside in the sandbox account and to carry the sandbox tag. Any ARN failing either check SHALL cause refusal of the entire petition, not partial admission.
 
+7.3.1. The account check is offline. The account field is read from the ARN and compared to the sandbox account identifier supplied to the admission call. It is in force from Phase 2.
+
+7.3.2. The tag check requires an AWS read and therefore cannot be performed by admission code, which holds no credentials and constructs no network path (I1, I2, §5.5). It is deferred to Phase 3, where the tag is read outside the admission decision and supplied to it. Until Phase 3, §7.3 is partially implemented: a petition admitted in Phase 2 has not had its ARNs tag-verified. No writ is served in Phase 2 (§7.7), so no unverified ARN is acted upon.
+
 7.4. Petitions proposing a Terraform diff SHALL be gated on `terraform plan -json`. A plan containing any `delete` action on a resource type outside the explicitly enumerated deletable set SHALL cause refusal.
 
 7.5. Admitted petitions SHALL be classified by blast radius into `auto` and `human` bands. The banding rule SHALL be data, not code branches, and SHALL be independently reviewable.
