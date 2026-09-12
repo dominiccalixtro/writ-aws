@@ -8,15 +8,59 @@ place a Petition may become a Writ or a Refusal.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
+from types import MappingProxyType
+from typing import Mapping
 
 from writ.petition import Petition
 from writ.writs import Writ
 
-# sec. 7.1 — explicit allowlist, no wildcards. Populated during Phase 2 build-out.
-ALLOWED_ACTIONS: frozenset[str] = frozenset()
 
-# sec. 7.6 — always classifies "human", never overridable by configuration.
+class Band(str, Enum):
+    """§7.5 — blast-radius bands. Two only."""
+    AUTO = "auto"
+    HUMAN = "human"
+
+
+# §7.5 — the banding rule as data, not code branches. Independently
+# reviewable: every permitted action and its band, one table.
+ACTION_BANDS: Mapping[str, Band] = MappingProxyType({
+    "ec2:RevokeSecurityGroupIngress": Band.AUTO,
+})
+
+# §7.1 — derived from ACTION_BANDS so an action cannot be allowlisted
+# without a band decision. Two independent structures would drift silently.
+ALLOWED_ACTIONS: frozenset[str] = frozenset(ACTION_BANDS)
+
+# §7.6 — applied after the table and overriding it. Not configurable:
+# a module constant has nowhere to be overridden from.
 ALWAYS_HUMAN_PREFIXES: tuple[str, ...] = ("iam:", "cloudtrail:", "kms:", "organizations:")
+
+for _action in ACTION_BANDS:
+    if _action.startswith(ALWAYS_HUMAN_PREFIXES):
+        raise ValueError(
+            f"ACTION_BANDS entry {_action!r} starts with an ALWAYS_HUMAN_PREFIXES "
+            "prefix (sec. 7.6) but is assigned a band (sec. 7.5) — sec. 7.6 "
+            "overrides any band assigned here, so the table is contradictory."
+        )
+    if "*" in _action:
+        raise ValueError(
+            f"ACTION_BANDS entry {_action!r} contains a wildcard, prohibited "
+            "in the allowlist by sec. 7.1."
+        )
+del _action
+
+
+# The reason is typed, not prose, specifically so tests can assert *why* a
+# petition was refused — otherwise a deny-everything implementation would
+# pass the entire suite.
+class RefusalReason(str, Enum):
+    """Typed refusal reasons. Tests assert on these, not on prose."""
+    ACTION_NOT_ALLOWLISTED = "action_not_allowlisted"
+    ARN_OUTSIDE_SANDBOX_ACCOUNT = "arn_outside_sandbox_account"
+    MALFORMED_ARN = "malformed_arn"
+    PLAN_PROHIBITED_DELETE = "plan_prohibited_delete"
+    PLAN_UNPARSEABLE = "plan_unparseable"
 
 
 @dataclass(frozen=True)
@@ -24,7 +68,8 @@ class Refusal:
     """A terminal decision for one petition (sec. 3.7). Never auto-retried."""
 
     finding_id: str
-    reason: str
+    reason: RefusalReason
+    section: str
 
 
 def admit(petition: Petition, sandbox_account_id: str) -> Writ | Refusal:
