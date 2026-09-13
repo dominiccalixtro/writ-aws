@@ -28,6 +28,34 @@ class Writ:
     classification: str  # "auto" | "human" — sec. 7.5, 7.6
 
 
-def issue_writ(*args, **kwargs) -> Writ:
-    """Construct a Writ from an admitted petition. Never serves it (I8)."""
-    raise NotImplementedError("sec. 7.7 — writ issuance not yet implemented")
+def issue_writ(
+    *,
+    finding_id: str,
+    scope_actions: tuple[str, ...],
+    scope_resource_arns: tuple[str, ...],
+    classification: str,
+) -> Writ:
+    """Construct a Writ from an admitted petition. Never serves it (I8).
+
+    Keyword-only on purpose: the scope tuples are positionally
+    indistinguishable, and swapping actions for ARNs would produce a writ that
+    is well-formed and wrong. Term is not a parameter — §7.7 leaves 900 as the
+    sole legal value, so `Writ` sets it and no caller can pass another.
+
+    This function constructs and returns. It opens no socket, builds no AWS
+    client and performs no write (invariant I8); serving a writ is Phase 3 and
+    has no code path in this repository.
+    """
+    if classification not in ("auto", "human"):
+        raise ValueError(
+            f"classification {classification!r} is not a §7.5 band; "
+            "only 'auto' and 'human' exist"
+        )
+    if not scope_actions:
+        raise ValueError("a writ with no actions has no scope to narrow (sec. 3.6)")
+    return Writ(
+        finding_id=finding_id,
+        scope_actions=tuple(scope_actions),
+        scope_resource_arns=tuple(scope_resource_arns),
+        classification=classification,
+    )
