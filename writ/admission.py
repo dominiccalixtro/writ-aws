@@ -44,9 +44,16 @@ ALWAYS_HUMAN_PREFIXES: tuple[str, ...] = ("iam:", "cloudtrail:", "kms:", "organi
 # convenience — it asserts that destroying that resource is recoverable.
 DELETABLE_RESOURCE_TYPES: frozenset[str] = frozenset()
 
-# §7.4 — Terraform reports a replacement as a delete paired with a create. A
-# replacement destroys the original, so it is gated exactly like a delete.
-_DELETING_ACTIONS: frozenset[str] = frozenset({"delete", "destroy"})
+# §7.4 — a replacement destroys the original, so it is gated exactly like a
+# delete. `terraform plan -json` (the machine-readable UI stream §7.4 names)
+# reports one as the single action "replace"; `terraform show -json` reports
+# the same change as "delete" paired with "create". Both forms are gated.
+_DELETING_ACTIONS: frozenset[str] = frozenset({"delete", "destroy", "replace"})
+
+# §3.5 — the plan actions this gate understands as leaving every existing
+# resource in place. Anything in neither set ("move", "forget", "remove", or an
+# action a later Terraform adds) is ungateable, and refuses as such.
+_NON_DESTRUCTIVE_ACTIONS: frozenset[str] = frozenset({"noop", "create", "read", "update"})
 
 def validate_action_bands(bands: Mapping[str, Band]) -> None:
     """Reject a contradictory or wildcarded band table (sec. 7.1, 7.6).
@@ -213,6 +220,8 @@ def _plan_refusal(terraform_diff: str) -> RefusalReason | None:
         raw = change.get("actions", change.get("action"))
         actions = [raw] if isinstance(raw, str) else raw
         if not isinstance(actions, list) or not all(isinstance(a, str) for a in actions):
+            return RefusalReason.PLAN_UNPARSEABLE
+        if not actions or not set(actions) <= _DELETING_ACTIONS | _NON_DESTRUCTIVE_ACTIONS:
             return RefusalReason.PLAN_UNPARSEABLE
         if _DELETING_ACTIONS.intersection(actions):
             if not isinstance(resource_type, str) or resource_type not in DELETABLE_RESOURCE_TYPES:
