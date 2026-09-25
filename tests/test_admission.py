@@ -144,6 +144,43 @@ class AdmissionPlanGateTests(unittest.TestCase):
         self.assertIsInstance(outcome, Refusal)
         self.assertEqual(outcome.reason, RefusalReason.PLAN_PROHIBITED_DELETE)
 
+    def test_replace_as_plan_json_reports_it_is_gated_as_a_delete(self) -> None:
+        """sec. 7.4 — the machine-readable UI stream says "replace", not delete+create.
+
+        The line below is verbatim `terraform plan -json` output from Terraform
+        1.16.4 for a forced replacement, with only the resource renamed. Before
+        this test the gate knew only the `terraform show -json` spelling, and a
+        plan replacing a CloudTrail trail passed it.
+        """
+        plan = (
+            '{"@level":"info","@message":"aws_cloudtrail.x: Plan to replace",'
+            '"@module":"terraform.ui","@timestamp":"2026-09-25T22:08:09.351390Z",'
+            '"change":{"resource":{"addr":"aws_cloudtrail.x","module":"",'
+            '"resource":"aws_cloudtrail.x","implied_provider":"aws",'
+            '"resource_type":"aws_cloudtrail","resource_name":"x","resource_key":null},'
+            '"action":"replace","reason":"cannot_update"},"type":"planned_change"}\n'
+        )
+        outcome = admit(petition(terraform_diff=plan), SANDBOX)
+        self.assertIsInstance(outcome, Refusal)
+        self.assertEqual(outcome.reason, RefusalReason.PLAN_PROHIBITED_DELETE)
+
+    def test_action_the_gate_does_not_know_is_refused(self) -> None:
+        """sec. 3.5 — an ungateable plan action is not an innocent one."""
+        for action in ("move", "forget", "remove", "import", "obliterate", "", "DELETE"):
+            with self.subTest(action=action):
+                outcome = admit(
+                    petition(terraform_diff=self._plan(action, "aws_security_group")), SANDBOX
+                )
+                self.assertIsInstance(outcome, Refusal)
+                self.assertEqual(outcome.reason, RefusalReason.PLAN_UNPARSEABLE)
+        empty = (
+            '{"type":"planned_change","change":'
+            '{"resource":{"resource_type":"aws_security_group"},"actions":[]}}\n'
+        )
+        outcome = admit(petition(terraform_diff=empty), SANDBOX)
+        self.assertIsInstance(outcome, Refusal)
+        self.assertEqual(outcome.reason, RefusalReason.PLAN_UNPARSEABLE)
+
     def test_unparseable_plan_is_refused(self) -> None:
         for diff in ("{not json", "", '{"type":"version"}\n', "[]"):
             with self.subTest(diff=diff):
