@@ -44,6 +44,13 @@ live sandbox account, then the sandbox destroyed. Record here: capture date,
 which findings/plans/events were captured, and confirmation of `terraform
 destroy` leaving no billable resource (acceptance A1.4).
 
+Procedure: `terraform/capture/README.md` (drafted 2026-09-25, not yet
+exercised). It covers pre-flight checks, the four finding targets, the two
+plan fixtures, the CloudTrail event, redaction with `tools/redact_fixture.py`,
+and teardown verification. The record for this section should also say
+whether the public-bucket target carried a public policy (`s3_public_policy`)
+and, if so, that account-level S3 Block Public Access was restored.
+
 ## Phase 0 findings — STS scoping lab
 
 Performed. This exercise **does not satisfy any A0 acceptance criterion**; it is
