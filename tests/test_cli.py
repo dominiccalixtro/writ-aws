@@ -166,6 +166,38 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, EXIT_REFUSED)
         self.assertEqual(json.loads(out)["reason"], "arn_outside_sandbox_account")
 
+    def test_record_names_the_sandbox(self) -> None:
+        _, out, _ = self._run(*self._base_args(self._write_petition()))
+        self.assertEqual(json.loads(out)["sandbox_account_id"], SANDBOX)
+
+    def test_malformed_sandbox_account_id_is_rejected_before_any_decision(self) -> None:
+        """An operator typo is not a sandbox; nothing is decided or recorded."""
+        for account in ("12345", SANDBOX + "0", "", "\u0661" * 12):
+            with self.subTest(account=account):
+                with self.assertRaises(SystemExit):
+                    with redirect_stderr(io.StringIO()):
+                        main([
+                            "--petition", str(self._write_petition()),
+                            "--sandbox-account-id", account,
+                            "--run-dir", str(self.run_dir),
+                        ])
+        self.assertFalse(self.run_dir.exists())
+
+    def test_parse_refusal_is_not_reported_before_it_is_recorded(self) -> None:
+        """sec. 3.8 — nothing, stderr included, precedes persistence."""
+        path = self.tmp / "petition.json"
+        path.write_text("{not json", encoding="utf-8")
+        blocker = self.tmp / "not-a-dir"
+        blocker.write_text("", encoding="utf-8")
+        code, out, err = self._run(
+            "--petition", str(path),
+            "--sandbox-account-id", SANDBOX,
+            "--run-dir", str(blocker),
+        )
+        self.assertEqual(code, EXIT_INPUT_ERROR)
+        self.assertEqual(out, "")
+        self.assertNotIn("refused at parse", err)
+
     def test_sandbox_account_id_is_required(self) -> None:
         with self.assertRaises(SystemExit):
             with redirect_stderr(io.StringIO()):

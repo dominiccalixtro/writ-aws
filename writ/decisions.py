@@ -11,7 +11,9 @@ sec. 3.8.1 adds three obligations this module carries:
     admission, and its "refused" branch leads to a decision record;
   - every record names the petition it decided, by the SHA-256 of the
     petition's raw bytes, so two petitions for one finding are two decisions
-    rather than one record read twice;
+    rather than one record read twice. It also names the sandbox account it
+    was decided against: the outcome is a function of both, and a record that
+    omitted either could not be reproduced;
   - no record replaces the record of a different decision. The filename carries
     a digest of the record's own bytes, so an identical decision lands on its
     own file and a different one cannot land on anybody else's.
@@ -21,15 +23,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 
 from writ.admission import Refusal, RefusalReason
 from writ.petition import PetitionError
 from writ.writs import Writ
 
-# 2: records name their petition (petition_sha256) and parse refusals are
-# recorded (sec. 3.8.1). A reader of version 1 records must not assume either.
+# 2: records name their petition (petition_sha256) and sandbox, and parse
+# refusals are recorded (sec. 3.8.1). A version 1 reader must assume none of it.
 RECORD_VERSION = 2
 
 # A finding id reaches this module from an ASFF finding, which sec. 3.1 defines
@@ -41,6 +45,7 @@ _UNSAFE_FOR_FILENAME = re.compile(r"[^a-z0-9]+")
 _SLUG_LIMIT = 60
 
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+_ACCOUNT_ID = re.compile(r"[0-9]{12}")
 
 # Every PetitionError message opens with the clause it enforces ("sec. 6.4 —
 # ..."). Only that clause is recorded; the rest of the message can quote the
@@ -57,43 +62,67 @@ _RECORD_DIGEST_CHARS = 16
 Outcome = Writ | Refusal | PetitionError
 
 
-def record_decision(outcome: Outcome, run_dir: Path, *, petition_sha256: str) -> Path:
-    """Persist one decision under run_dir, bound to the petition it decided.
+def record_decision(
+    outcome: Outcome, run_dir: Path, *, petition_sha256: str, sandbox_account_id: str
+) -> Path:
+    """Persist one decision under run_dir, bound to what it decided and against what.
 
     `outcome` is what admission produced: a Writ, a Refusal, or the PetitionError
     that refused the petition at parse (sec. 6.5, 3.8.1). `petition_sha256` is
-    the hex SHA-256 of the petition's raw bytes. Keyword-only because a record
-    that does not say which petition it decided is the gap sec. 3.8.1 closes.
+    the hex SHA-256 of the petition's raw bytes; `sandbox_account_id` is the
+    operator's sandbox the decision was made against (sec. 7.3.1). Keyword-only
+    because a record that omits either cannot be reproduced.
 
     Returns the path written. Re-recording an identical decision is idempotent
     — same bytes, same name. A file already at the name with different bytes
     raises FileExistsError and is left untouched (sec. 3.8.1).
     """
     # Serialise before touching the filesystem. _record_body is what rejects a
-    # non-outcome or a malformed digest, and a rejected call should leave no
+    # non-outcome or a malformed binding, and a rejected call should leave no
     # directory behind it.
     body = json.dumps(
-        _record_body(outcome, petition_sha256), indent=2, sort_keys=True
+        _record_body(outcome, petition_sha256, sandbox_account_id), indent=2, sort_keys=True
     ) + "\n"
-    data = body.encode("utf-8")
     run_dir.mkdir(parents=True, exist_ok=True)
-    path = run_dir / _record_name(outcome, data)
-    try:
-        # sec. 7.8 — newline="" stops Python translating "\n" to "\r\n" on
-        # Windows, which would change the bytes, and so the digest, of an
-        # identical decision. "x" creates or fails: nothing is ever truncated.
-        with path.open("x", encoding="utf-8", newline="") as handle:
-            handle.write(body)
-    except FileExistsError:
-        if path.read_bytes() != data:
-            raise FileExistsError(
-                f"sec. 3.8.1 — {path} already holds a different decision record; "
-                "a record is never replaced"
-            ) from None
+    path = run_dir / _record_name(outcome, body.encode("utf-8"))
+    _write_once(path, body)
     return path
 
 
-def _record_body(outcome: Outcome, petition_sha256: str) -> dict[str, object]:
+def _write_once(path: Path, body: str) -> None:
+    """Create `path` holding `body` whole, or confirm it already does.
+
+    The record is written to a temporary file and hard-linked into place, so
+    its name only ever points at a complete record: a write that fails part-way
+    leaves nothing under the name, and a retry succeeds. os.link refuses an
+    existing name, which is what keeps sec. 3.8.1's "never replaced" free of a
+    check-then-write race.
+    """
+    data = body.encode("utf-8")
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".record-", suffix=".tmp")
+    try:
+        # sec. 7.8 — newline="" stops Python translating "\n" to "\r\n" on
+        # Windows, which would change the bytes, and so the digest, of an
+        # identical decision.
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            if path.read_bytes() != data:
+                raise FileExistsError(
+                    f"sec. 3.8.1 — {path} already holds a different decision record; "
+                    "a record is never replaced"
+                ) from None
+    finally:
+        os.unlink(temporary)
+
+
+def _record_body(
+    outcome: Outcome, petition_sha256: str, sandbox_account_id: str
+) -> dict[str, object]:
     """The record's content. Deterministic: no timestamp, no host, no run id.
 
     sec. 7.8 exists so identical decisions digest identically. A clock reading
@@ -105,12 +134,15 @@ def _record_body(outcome: Outcome, petition_sha256: str) -> dict[str, object]:
             "petition_sha256 must be 64 lowercase hex characters — the SHA-256 of "
             "the petition's raw bytes (sec. 3.8.1)"
         )
+    if not isinstance(sandbox_account_id, str) or not _ACCOUNT_ID.fullmatch(sandbox_account_id):
+        raise ValueError("sandbox_account_id must be a 12-digit AWS account ID (sec. 7.3.1)")
     if isinstance(outcome, Writ):
         return {
             "record_version": RECORD_VERSION,
             "decision": "writ",
             "finding_id": outcome.finding_id,
             "petition_sha256": petition_sha256,
+            "sandbox_account_id": sandbox_account_id,
             "scope_actions": list(outcome.scope_actions),
             "scope_resource_arns": list(outcome.scope_resource_arns),
             "term_seconds": outcome.term_seconds,
@@ -122,6 +154,7 @@ def _record_body(outcome: Outcome, petition_sha256: str) -> dict[str, object]:
             "decision": "refusal",
             "finding_id": outcome.finding_id,
             "petition_sha256": petition_sha256,
+            "sandbox_account_id": sandbox_account_id,
             "reason": outcome.reason.value,
             "section": outcome.section,
         }
@@ -135,6 +168,7 @@ def _record_body(outcome: Outcome, petition_sha256: str) -> dict[str, object]:
             "decision": "refusal",
             "finding_id": None,
             "petition_sha256": petition_sha256,
+            "sandbox_account_id": sandbox_account_id,
             "reason": RefusalReason.PETITION_UNPARSEABLE.value,
             "section": _parse_section(outcome),
         }

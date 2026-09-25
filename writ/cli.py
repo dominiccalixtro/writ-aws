@@ -49,6 +49,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sandbox-account-id",
         required=True,
+        type=_account_id,
         help="the sandbox account every target ARN must reside in (sec. 7.3.1)",
     )
     parser.add_argument(
@@ -58,6 +59,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"directory for decision records (default: {DEFAULT_RUN_DIR})",
     )
     return parser
+
+
+def _account_id(value: str) -> str:
+    """A 12-digit account ID. Anything else is an operator typo, not a sandbox."""
+    if len(value) != 12 or not value.isascii() or not value.isdigit():
+        raise argparse.ArgumentTypeError(f"{value!r} is not a 12-digit AWS account ID")
+    return value
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -79,7 +87,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         petition = parse_petition(raw)
     except PetitionError as exc:
-        print(f"writ: petition refused at parse: {exc}", file=sys.stderr)
         outcome = exc
     else:
         outcome = admit(petition, args.sandbox_account_id)
@@ -88,11 +95,18 @@ def main(argv: list[str] | None = None) -> int:
     # reaches stdout is then the recorded bytes themselves, so what an operator
     # reads and what the record digests to cannot drift apart.
     try:
-        record_path = record_decision(outcome, args.run_dir, petition_sha256=petition_sha256)
+        record_path = record_decision(
+            outcome,
+            args.run_dir,
+            petition_sha256=petition_sha256,
+            sandbox_account_id=args.sandbox_account_id,
+        )
     except OSError as exc:
         print(f"writ: decision not recorded ({exc}); refusing to report it", file=sys.stderr)
         return EXIT_INPUT_ERROR
 
+    if isinstance(outcome, PetitionError):
+        print(f"writ: petition refused at parse: {outcome}", file=sys.stderr)
     sys.stdout.write(record_path.read_text(encoding="utf-8"))
     print(f"writ: recorded {record_path}", file=sys.stderr)
 
