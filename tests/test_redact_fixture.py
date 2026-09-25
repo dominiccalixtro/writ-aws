@@ -53,7 +53,7 @@ class RedactTests(unittest.TestCase):
         self.assertEqual(redact(longer, {REAL: PLACEHOLDER}, {}), longer)
 
     def test_aws_key_and_unique_ids_are_replaced(self) -> None:
-        for prefix in ("AKIA", "ASIA", "AROA", "AIDA"):
+        for prefix in ("AKIA", "ASIA", "AROA", "AIDA", "ABIA", "ACCA"):
             with self.subTest(prefix=prefix):
                 real_id = prefix + "Q7" * 8
                 out = redact(f'"accessKeyId": "{real_id}"', {}, {})
@@ -99,8 +99,38 @@ class RedactTests(unittest.TestCase):
         self.assertEqual(redact(line, {}, {}), line)
 
     def test_arns_with_empty_fields_survive(self) -> None:
-        arn = "arn:aws:s3:::writ-capture-public-20260925"
-        self.assertEqual(redact(arn, {}, {}), arn)
+        """Every ASFF finding carries ARNs with "::" in them; none may change."""
+        for arn in (
+            "arn:aws:s3:::writ-capture-public-20260925",
+            '"ProductArn": "arn:aws:securityhub:ap-southeast-1::product/aws/securityhub"',
+            "arn:aws:iam::aws:policy/service-role/AWS_ConfigRole",
+            "arn:aws:securityhub:::ruleset/cis-aws-foundations-benchmark/v/1.2.0",
+            "arn:aws:iam::aws:policy/AdministratorAccess",
+        ):
+            with self.subTest(arn=arn):
+                self.assertEqual(redact(arn, {}, {}), arn)
+
+    def test_address_ending_a_sentence_is_replaced(self) -> None:
+        out = redact("Request came from 8.8.8.8. It was denied.", {}, {})
+        self.assertEqual(out, "Request came from 192.0.2.1. It was denied.")
+        out = redact("Source 2606:4700:4700::1111. Denied.", {}, {})
+        self.assertEqual(out, "Source 2001:db8::1. Denied.")
+
+    def test_dotted_runs_that_are_not_addresses_survive(self) -> None:
+        for text in ("1.2.3.4.5", "v2023.6.20241010.0", "ami-2023.8.8.8.8x"):
+            with self.subTest(text=text):
+                self.assertEqual(redact(text, {}, {}), text)
+
+    def test_s3_canonical_user_id_is_replaced(self) -> None:
+        canonical = ("3f" * 32)
+        out = redact(f'"OwnerId": "{canonical}"', {}, {})
+        self.assertNotIn(canonical, out)
+        self.assertEqual(residue(out), set())
+
+    def test_identity_store_id_is_replaced(self) -> None:
+        out = redact('"identityStoreArn": "arn:aws:identitystore::x:identitystore/d-9f7e6d5c4b"', {}, {})
+        self.assertNotIn("d-9f7e6d5c4b", out)
+        self.assertIn("d-0000000000", out)
 
     def test_redaction_is_idempotent(self) -> None:
         text = f"{REAL} 8.8.4.4 AKIA{'Q7' * 8} a@b.example.com"

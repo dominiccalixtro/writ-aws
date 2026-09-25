@@ -13,6 +13,7 @@ Replaces, in order:
     allowlist in tests/test_redaction.py, which is where adding one is reviewed;
   - AWS key and unique IDs (AKIA..., ASIA..., AROA..., ...) with a fixed
     EXAMPLE form. A CloudTrail event carries the caller's session key ID;
+  - S3 canonical user IDs and Identity Center identity store IDs;
   - globally routable IP addresses with documentation addresses (RFC 5737,
     RFC 3849). A CloudTrail event carries the caller's source IP — the
     operator's home address. 0.0.0.0/0 and private ranges are kept: the first
@@ -43,15 +44,32 @@ from pathlib import Path
 from tests.test_redaction import ACCOUNT_ID_PATTERN, ALLOWED_ACCOUNT_PLACEHOLDERS
 
 # IAM unique-ID prefixes (access keys, roles, users, groups, instance profiles,
-# managed policies, certificates, public keys). 20 characters in total.
+# managed policies, certificates, public keys, bearer tokens, context keys).
+# 20 characters in total.
 AWS_ID_PATTERN = re.compile(
-    r"(?<![A-Z0-9])(AKIA|ASIA|AROA|AIDA|AGPA|AIPA|ANPA|ANVA|ASCA|APKA)[A-Z0-9]{16}(?![A-Z0-9])"
+    r"(?<![A-Z0-9])(AKIA|ASIA|AROA|AIDA|AGPA|AIPA|ANPA|ANVA|ASCA|APKA|ABIA|ACCA)"
+    r"[A-Z0-9]{16}(?![A-Z0-9])"
 )
 _EXAMPLE_ID_SUFFIX = "EXAMPLE000000000"  # 16 characters, as the real suffix
 
-IPV4_PATTERN = re.compile(r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])")
+# An S3 canonical user ID (ASFF Details.AwsS3Bucket.OwnerId): 64 hex characters,
+# one per account, as identifying as the account ID itself.
+CANONICAL_ID_PATTERN = re.compile(r"(?<![0-9A-Fa-f])[0-9a-f]{64}(?![0-9A-Fa-f])")
+EXAMPLE_CANONICAL_ID = "0123456789abcdef" * 4
+# An IAM Identity Center identity store ID, as CloudTrail carries it.
+IDENTITY_STORE_PATTERN = re.compile(r"(?<![A-Za-z0-9-])d-[0-9a-f]{10}(?![A-Za-z0-9])")
+EXAMPLE_IDENTITY_STORE = "d-0000000000"
+
+# Bounded by characters an address cannot sit inside. Without the letter and
+# hyphen bounds, the "1::" in "ap-southeast-1::product" and the "::a" in
+# "iam::aws" parse as routable IPv6 and get rewritten inside ARNs. A trailing
+# full stop is allowed, so an address ending a sentence is still found.
+IPV4_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_-])(?<![0-9]\.)(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9A-Za-z_-]|\.[0-9])"
+)
 IPV6_PATTERN = re.compile(
-    r"(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Fa-f:])"
+    r"(?<![A-Za-z0-9_.:-])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}"
+    r"(?![A-Za-z0-9_:-]|\.[A-Za-z0-9])"
 )
 EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 EXAMPLE_EMAIL = "operator@example.com"
@@ -83,6 +101,8 @@ def redact(text: str, accounts: dict[str, str], literals: dict[str, str]) -> str
         text = re.sub(rf"(?<!\d){real}(?!\d)", placeholder, text)
 
     text = AWS_ID_PATTERN.sub(lambda m: m.group(1) + _EXAMPLE_ID_SUFFIX, text)
+    text = CANONICAL_ID_PATTERN.sub(EXAMPLE_CANONICAL_ID, text)
+    text = IDENTITY_STORE_PATTERN.sub(EXAMPLE_IDENTITY_STORE, text)
     text = _replace_global_addresses(text)
     return EMAIL_PATTERN.sub(EXAMPLE_EMAIL, text)
 
