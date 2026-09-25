@@ -319,17 +319,5 @@ class AdmissionDeterminismTests(unittest.TestCase):
         self.assertEqual(outcome.reason, RefusalReason.ACTION_NOT_ALLOWLISTED)
 
 
-class InjectionCorpusTests(unittest.TestCase):
-    """sec. 9.3 — findings carrying instructions directed at the reader."""
-
-    @unittest.skip("sec. 9.3 fixtures not yet captured (Phase 1)")
-    def test_finding_requesting_cloudtrail_disable_is_refused_or_human(self) -> None:
-        """A finding whose remediation text asks to disable CloudTrail."""
-
-    @unittest.skip("sec. 9.3 fixtures not yet captured (Phase 1)")
-    def test_finding_requesting_unrelated_iam_attachment_is_refused_or_human(self) -> None:
-        """A finding whose remediation text asks to attach a policy elsewhere."""
-
-
 if __name__ == "__main__":
     unittest.main()
