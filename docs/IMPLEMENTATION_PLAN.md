@@ -34,6 +34,7 @@
 | Sandbox account | The dedicated AWS account (section 4) that is the sole permitted target of any writ. |
 | Management account | The operator's personal AWS account. Holds pre-existing personal resources. Never a target. |
 | Fixture | A recorded, redacted artifact (finding, plan JSON, CloudTrail event) committed to the repository and replayed by tests without network access. |
+| Petition fixture | A petition authored by hand and committed under `tests/fixtures/`, standing in for agent-plane output. Phases 0–2 contain no agent plane (section 12), so nothing else turns a finding into a petition. Authored, not captured: it answers one captured finding fixture and carries only that fixture's redacted identifiers. |
 
 ## 3. The normative trust boundary
 
@@ -151,6 +152,8 @@ ASFF finding (untrusted)
 
 7.3.2. The tag check requires an AWS read and therefore cannot be performed by admission code, which holds no credentials and constructs no network path (I1, I2, §5.5). It is deferred to Phase 3, where the tag is read outside the admission decision and supplied to it. Until Phase 3, §7.3 is partially implemented: a petition admitted in Phase 2 has not had its ARNs tag-verified. No writ is served in Phase 2 (§7.7), so no unverified ARN is acted upon.
 
+7.3.3. An ARN whose account field is empty cannot be placed in an account offline. S3 bucket and object ARNs (`arn:aws:s3:::name`) are the common case. Under §3.5 such an ARN SHALL be refused by the §7.3.1 check. The petition SHALL NOT supply the missing account: a petition that could name its own account would decide §7.3 for itself. Placing such a resource requires an AWS read, or an ownership-enforcing request parameter at service time (for S3, `ExpectedBucketOwner`); both belong to Phase 3. Consequently no petition targeting an S3 bucket is admissible in Phase 2, and the public-bucket fixture of §5.2 exercises the refusal path only.
+
 7.4. Petitions proposing a Terraform diff SHALL be gated on `terraform plan -json`. A plan containing any `delete` action on a resource type outside the explicitly enumerated deletable set SHALL cause refusal.
 
 7.5. Admitted petitions SHALL be classified by blast radius into `auto` and `human` bands. The banding rule SHALL be data, not code branches, and SHALL be independently reviewable.
@@ -183,6 +186,8 @@ The following SHALL hold at every commit, and each SHALL have a test proving the
 
 9.3. The suite SHALL include an injection corpus in which findings carry instructions directed at the reader, including at minimum a finding whose remediation text asks for CloudTrail to be disabled and one that asks for an IAM policy to be attached to an unrelated principal. Each SHALL produce a refusal or a `human` classification, and SHALL NOT produce an `auto` writ.
 
+9.3.1. Phases 0–2 contain no agent plane, so no component turns a finding into a petition. The corpus therefore measures the broker on the assumption that injection has already succeeded against the agent plane (§3.1–3.2). Each corpus entry SHALL pair (a) a captured finding fixture with the hostile text placed in an untrusted field — at minimum `Remediation.Recommendation.Text` — with (b) the petition fixture a fully compromised agent plane would emit by obeying that text, carrying the text verbatim in `rationale`. The entry's result is the broker's decision on that petition, parse refusals included (§3.8.1). Alongside the corpus — not part of it, and not counted by A2.2 — the suite SHALL run at least one control petition against the same fixtures that is expected to produce an `auto` writ, so that a corpus refusing everything for an unrelated reason (a wrong sandbox identifier, say) cannot pass vacuously. The corpus does not measure the agent plane's own resistance to injection; that is out of contract with the agent plane itself.
+
 9.4. The injection corpus SHALL be exercised against fixtures only. It SHALL NOT be run against live AWS.
 
 9.5. A new admission rule SHALL NOT be merged without a test proving the corresponding unsafe input fails.
@@ -208,7 +213,7 @@ The following SHALL hold at every commit, and each SHALL have a test proving the
 
 - A2.1 — Every invariant I1–I8 has at least one passing adversarial test.
 - A2.2 — The injection corpus of 9.3 produces zero `auto` classifications.
-- A2.3 — Running the CLI against a fixture finding prints a writ or a typed refusal, and performs no network call — proven by a test that fails on any socket construction.
+- A2.3 — Running the CLI against a fixture finding prints a writ or a typed refusal, and performs no network call — proven by a test that fails on any socket construction. Until an agent plane is in contract, "against a fixture finding" means against the petition fixture answering that finding (section 2, §9.3.1).
 - A2.4 — The repository contains no code path capable of serving a writ (I8), verified by review, not by assertion.
 
 ## 11. Definition of done
