@@ -14,6 +14,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from writ.admission import Refusal, RefusalReason, admit
 from writ.decisions import RECORD_VERSION, record_decision
@@ -48,7 +49,7 @@ class DecisionRecordTests(unittest.TestCase):
 
     def test_writ_is_recorded(self) -> None:
         """sec. 3.8 — an admission produces a persisted record."""
-        path = record_decision(self._writ(), self.run_dir, petition_sha256=PETITION)
+        path = record_decision(self._writ(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
         self.assertTrue(path.is_file())
         body = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(body["decision"], "writ")
@@ -59,7 +60,7 @@ class DecisionRecordTests(unittest.TestCase):
 
     def test_refusal_is_recorded(self) -> None:
         """sec. 3.8 — 'admission and refusal alike'."""
-        path = record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION)
+        path = record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
         body = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(body["decision"], "refusal")
         self.assertEqual(body["reason"], RefusalReason.ACTION_NOT_ALLOWLISTED.value)
@@ -67,7 +68,7 @@ class DecisionRecordTests(unittest.TestCase):
 
     def test_run_dir_is_created(self) -> None:
         nested = self.run_dir / "deep" / "deeper"
-        path = record_decision(self._writ(), nested, petition_sha256=PETITION)
+        path = record_decision(self._writ(), nested, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
         self.assertTrue(path.is_file())
 
     def test_record_bytes_are_stable(self) -> None:
@@ -76,27 +77,27 @@ class DecisionRecordTests(unittest.TestCase):
         Written with newline="" so no platform rewrites "\\n" to "\\r\\n", and
         with no timestamp, so the same decision is byte-identical on every run.
         """
-        first = record_decision(self._writ(), self.run_dir / "a", petition_sha256=PETITION).read_bytes()
-        second = record_decision(self._writ(), self.run_dir / "b", petition_sha256=PETITION).read_bytes()
+        first = record_decision(self._writ(), self.run_dir / "a", petition_sha256=PETITION, sandbox_account_id=SANDBOX).read_bytes()
+        second = record_decision(self._writ(), self.run_dir / "b", petition_sha256=PETITION, sandbox_account_id=SANDBOX).read_bytes()
         self.assertEqual(hashlib.sha256(first).hexdigest(), hashlib.sha256(second).hexdigest())
         self.assertNotIn(b"\r\n", first)
 
     def test_rerecording_an_identical_decision_is_idempotent(self) -> None:
         """sec. 3.7 — the same refusal of the same petition is one record."""
-        record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION)
-        record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION)
+        record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
+        record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
         self.assertEqual(len(list(self.run_dir.iterdir())), 1)
 
     def test_writ_and_refusal_for_one_finding_do_not_collide(self) -> None:
-        record_decision(self._writ(), self.run_dir, petition_sha256=PETITION)
-        record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION)
+        record_decision(self._writ(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
+        record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
         self.assertEqual(len(list(self.run_dir.iterdir())), 2)
 
     def test_record_names_the_petition_it_decided(self) -> None:
         """sec. 3.8.1 — a record says which petition it decided."""
         for outcome in (self._writ(), self._refusal()):
             with self.subTest(outcome=type(outcome).__name__):
-                path = record_decision(outcome, self.run_dir, petition_sha256=PETITION)
+                path = record_decision(outcome, self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
                 body = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(body["petition_sha256"], PETITION)
 
@@ -112,12 +113,14 @@ class DecisionRecordTests(unittest.TestCase):
             Refusal("finding-1", RefusalReason.ARN_OUTSIDE_SANDBOX_ACCOUNT, "sec. 7.3.1"),
             self.run_dir,
             petition_sha256=PETITION,
+            sandbox_account_id=SANDBOX,
         )
         first_bytes = first.read_bytes()
         second = record_decision(
             Refusal("finding-1", RefusalReason.ACTION_NOT_ALLOWLISTED, "sec. 7.2"),
             self.run_dir,
             petition_sha256=OTHER_PETITION,
+            sandbox_account_id=SANDBOX,
         )
         self.assertNotEqual(first, second)
         self.assertEqual(first.read_bytes(), first_bytes)
@@ -125,8 +128,8 @@ class DecisionRecordTests(unittest.TestCase):
 
     def test_same_outcome_for_two_petitions_is_two_records(self) -> None:
         """sec. 3.8.1 — two petitions are two decisions, even with one outcome."""
-        first = record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION)
-        second = record_decision(self._refusal(), self.run_dir, petition_sha256=OTHER_PETITION)
+        first = record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
+        second = record_decision(self._refusal(), self.run_dir, petition_sha256=OTHER_PETITION, sandbox_account_id=SANDBOX)
         self.assertNotEqual(first, second)
         self.assertEqual(len(list(self.run_dir.iterdir())), 2)
 
@@ -137,11 +140,11 @@ class DecisionRecordTests(unittest.TestCase):
         the test manufactures one: it alters a record in place and records the
         original decision again.
         """
-        path = record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION)
+        path = record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
         tampered = b'{"decision": "writ"}\n'
         path.write_bytes(tampered)
         with self.assertRaises(FileExistsError):
-            record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION)
+            record_decision(self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
         self.assertEqual(path.read_bytes(), tampered)
 
     def test_malformed_petition_digest_is_refused(self) -> None:
@@ -149,14 +152,66 @@ class DecisionRecordTests(unittest.TestCase):
         for digest in ("", "not-a-digest", PETITION.upper(), PETITION[:-1], "../" + PETITION[3:]):
             with self.subTest(digest=digest):
                 with self.assertRaises(ValueError):
-                    record_decision(self._refusal(), self.run_dir, petition_sha256=digest)
+                    record_decision(self._refusal(), self.run_dir, petition_sha256=digest, sandbox_account_id=SANDBOX)
         self.assertFalse(self.run_dir.exists())
 
+
+    def test_record_names_the_sandbox_it_was_decided_against(self) -> None:
+        """sec. 3.8.1 — the outcome depends on the sandbox, so the record says which."""
+        path = record_decision(
+            self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX
+        )
+        body = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(body["sandbox_account_id"], SANDBOX)
+
+    def test_one_petition_against_two_sandboxes_is_two_records(self) -> None:
+        """Contradictory-looking records must carry what explains them."""
+        first = record_decision(
+            self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX
+        )
+        second = record_decision(
+            self._refusal(),
+            self.run_dir,
+            petition_sha256=PETITION,
+            sandbox_account_id=SANDBOX[::-1],
+        )
+        self.assertNotEqual(first, second)
+
+    def test_malformed_sandbox_account_id_is_refused(self) -> None:
+        for account in ("", "12345", SANDBOX + "0", "abcdefghijkl", "../" + SANDBOX[3:]):
+            with self.subTest(account=account):
+                with self.assertRaises(ValueError):
+                    record_decision(
+                        self._refusal(),
+                        self.run_dir,
+                        petition_sha256=PETITION,
+                        sandbox_account_id=account,
+                    )
+        self.assertFalse(self.run_dir.exists())
+
+    def test_a_failed_write_leaves_no_record_and_a_retry_succeeds(self) -> None:
+        """A record's name only ever points at a whole record.
+
+        Written in place, a write that died part-way left a truncated file under
+        the record's own name, and every later attempt to record the same
+        decision was refused as a "different" record — permanently.
+        """
+        with mock.patch("writ.decisions.os.fsync", side_effect=OSError(28, "No space left")):
+            with self.assertRaises(OSError):
+                record_decision(
+                    self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX
+                )
+        self.assertEqual(list(self.run_dir.iterdir()), [])
+        path = record_decision(
+            self._refusal(), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX
+        )
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["decision"], "refusal")
+        self.assertEqual(list(self.run_dir.iterdir()), [path])
 
     def test_outcome_is_not_mutated(self) -> None:
         writ = self._writ()
         before = (writ.finding_id, writ.scope_actions, writ.term_seconds, writ.classification)
-        record_decision(writ, self.run_dir, petition_sha256=PETITION)
+        record_decision(writ, self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
         self.assertEqual(
             (writ.finding_id, writ.scope_actions, writ.term_seconds, writ.classification), before
         )
@@ -164,7 +219,7 @@ class DecisionRecordTests(unittest.TestCase):
     def test_non_outcome_is_refused(self) -> None:
         """sec. 3.8 records writs and refusals; anything else is a bug upstream."""
         with self.assertRaises(TypeError):
-            record_decision({"decision": "writ"}, self.run_dir, petition_sha256=PETITION)  # type: ignore[arg-type]
+            record_decision({"decision": "writ"}, self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)  # type: ignore[arg-type]
         # A rejected outcome leaves nothing behind: the type check runs before
         # the directory is created.
         self.assertFalse(self.run_dir.exists())
@@ -179,7 +234,7 @@ class ParseRefusalRecordTests(unittest.TestCase):
         self.run_dir = Path(self._tmp.name) / "run"
 
     def _record(self, message: str) -> dict[str, object]:
-        path = record_decision(PetitionError(message), self.run_dir, petition_sha256=PETITION)
+        path = record_decision(PetitionError(message), self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX)
         self.assertEqual(path.parent.resolve(), self.run_dir.resolve())
         return json.loads(path.read_text(encoding="utf-8"))
 
@@ -217,6 +272,7 @@ class DecisionRecordNameTests(unittest.TestCase):
             Refusal(finding_id, RefusalReason.MALFORMED_ARN, "sec. 7.3"),
             self.run_dir,
             petition_sha256=PETITION,
+            sandbox_account_id=SANDBOX,
         )
 
     def test_traversal_in_finding_id_cannot_escape_run_dir(self) -> None:
@@ -289,7 +345,7 @@ class AdmissionIsRecordableTests(unittest.TestCase):
         for outcome in (admitted, refused):
             with self.subTest(outcome=type(outcome).__name__):
                 self.assertTrue(
-                    record_decision(outcome, self.run_dir, petition_sha256=PETITION).is_file()
+                    record_decision(outcome, self.run_dir, petition_sha256=PETITION, sandbox_account_id=SANDBOX).is_file()
                 )
 
 

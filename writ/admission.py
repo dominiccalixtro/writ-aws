@@ -217,6 +217,10 @@ def _plan_refusal(terraform_diff: str) -> RefusalReason | None:
         resource_type = resource.get("resource_type")
         # Terraform writes a single "action" in some versions and an "actions"
         # list in others; a replacement appears as delete paired with create.
+        # Never both: the gate would read one and a reviewer the other — the
+        # duplicate-key smuggle sec. 6.5 refuses in the petition itself.
+        if "action" in change and "actions" in change:
+            return RefusalReason.PLAN_UNPARSEABLE
         raw = change.get("actions", change.get("action"))
         actions = [raw] if isinstance(raw, str) else raw
         if not isinstance(actions, list) or not all(isinstance(a, str) for a in actions):

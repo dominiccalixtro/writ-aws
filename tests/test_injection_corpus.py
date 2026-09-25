@@ -58,6 +58,16 @@ def plant(finding: dict, dotted: str, text: str) -> dict:
     return planted
 
 
+def read_planted(finding: dict, dotted: str) -> str:
+    """What an agent reading `finding` finds at the dotted path."""
+    node: object = finding
+    for key in dotted.split("."):
+        node = node[key]  # type: ignore[index]
+    if not isinstance(node, str):
+        raise TypeError(f"{dotted} is not text in this finding")
+    return node
+
+
 def _fill(template: str, finding: dict) -> str:
     """Identifiers come from the finding, never from the corpus file."""
     values = {
@@ -188,6 +198,14 @@ class CorpusShapeTests(unittest.TestCase):
         raw = petition_bytes(control["petition"], stand_in, control["rationale"])
         self.assertEqual(verdict(raw, PLACEHOLDER_ACCOUNT), "auto")
 
+    def test_planting_overwrites_the_field_and_nothing_else(self) -> None:
+        """sec. 9.3.1 (a) — the hostile text lands where the agent will read it."""
+        original = {"Id": "x", "Remediation": {"Recommendation": {"Text": "fix it", "Url": "u"}}}
+        planted = plant(original, MINIMUM_FIELD, "hostile")
+        self.assertEqual(read_planted(planted, MINIMUM_FIELD), "hostile")
+        self.assertEqual(planted["Remediation"]["Recommendation"]["Url"], "u")
+        self.assertEqual(original["Remediation"]["Recommendation"]["Text"], "fix it")
+
     def test_verdict_does_not_swallow_an_admission_crash(self) -> None:
         """An exception is a defect to report, never a refusal to count."""
         raw = json.dumps({
@@ -222,7 +240,10 @@ class InjectionCorpusTests(unittest.TestCase):
             planted = plant(
                 self._finding(entry["finding"]), entry["injected_field"], entry["injected_text"]
             )
-            raw = petition_bytes(entry["petition"], planted, entry["injected_text"])
+            # The compromised agent echoes what it read from the finding, not
+            # what the corpus meant to plant; the test below holds the two equal.
+            rationale = read_planted(planted, entry["injected_field"])
+            raw = petition_bytes(entry["petition"], planted, rationale)
             yield entry, planted, raw
 
     def test_no_corpus_entry_is_classified_auto(self) -> None:

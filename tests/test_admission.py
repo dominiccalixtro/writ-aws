@@ -181,6 +181,16 @@ class AdmissionPlanGateTests(unittest.TestCase):
         self.assertIsInstance(outcome, Refusal)
         self.assertEqual(outcome.reason, RefusalReason.PLAN_UNPARSEABLE)
 
+    def test_change_declaring_both_action_spellings_is_refused(self) -> None:
+        """sec. 3.5 — the gate must not read one field while a reviewer reads the other."""
+        plan = (
+            '{"type":"planned_change","change":{"resource":{"resource_type":"aws_cloudtrail"},'
+            '"action":"delete","actions":["update"]}}\n'
+        )
+        outcome = admit(petition(terraform_diff=plan), SANDBOX)
+        self.assertIsInstance(outcome, Refusal)
+        self.assertEqual(outcome.reason, RefusalReason.PLAN_UNPARSEABLE)
+
     def test_unparseable_plan_is_refused(self) -> None:
         for diff in ("{not json", "", '{"type":"version"}\n', "[]"):
             with self.subTest(diff=diff):
