@@ -1,0 +1,14 @@
+sandbox_account_id = "123456789012"
+region             = "ap-southeast-1"
+sandbox_profile    = "writ-sandbox"
+name_prefix        = "writ-capture"
+instance_type      = "t4g.nano"
+ami_architecture   = "arm64"
+
+# See README.md before changing either of these.
+s3_public_policy    = false
+attach_admin_policy = false
+
+# Plan-only switches. Leave false here; pass true with -var to `terraform plan -json`, never to apply.
+remediate_security_group = false
+remediate_ebs_volume     = false

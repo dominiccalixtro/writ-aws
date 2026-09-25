@@ -10,6 +10,10 @@ credentials
 # Decision records and run artifacts (regenerated per run, machine-specific)
 .runs/
 
+# Raw, unredacted Phase 1 captures. Only tools/redact_fixture.py output is
+# committed, under tests/fixtures/ (sec. 5.4).
+.capture/
+
 # Terraform state and provider caches (never committed; sandbox is ephemeral)
 .terraform/
 *.tfstate

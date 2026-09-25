@@ -33,9 +33,11 @@ ALLOWED_ACCOUNT_PLACEHOLDERS = frozenset({"123456789012"})
 ACCOUNT_ID_PATTERN = re.compile(r"(?<!\d)\d{12}(?!\d)")
 
 # Scanned regardless of git: directories that are never committed. `.lab/` holds
-# live sandbox scratch policy, and is gitignored precisely because it is not safe
-# to commit.
-NEVER_COMMITTED = ("__pycache__", ".git", ".lab", ".runs", ".venv", "venv", ".terraform")
+# live sandbox scratch policy and `.capture/` holds raw, unredacted captures;
+# both are gitignored precisely because they are not safe to commit.
+NEVER_COMMITTED = (
+    "__pycache__", ".git", ".lab", ".runs", ".capture", ".venv", "venv", ".terraform",
+)
 
 # Binary payloads have no reviewable text; a leaked ID would be a different
 # problem detected a different way.
