@@ -7,8 +7,9 @@ finding". Nothing in Phases 0-2 turns a finding into a petition — sec. 1 defin
 that as the agent plane's job, and invariant I2 forbids consulting a model
 during admission — so the petition, the artifact the agent plane emits, is what
 this command consumes. `--finding` remains accepted as an alias so existing
-invocations keep working. Closing A2.3 as literally worded needs both the
-Phase 1 fixture corpus (sec. 5) and an agent-plane component; neither exists.
+invocations keep working. A2.3 as amended reads "against a fixture finding" as
+against the petition fixture answering it (sec. 2, sec. 9.3.1), so closing it
+needs the Phase 1 fixture corpus (sec. 5), not an agent-plane component.
 
 The sandbox account id is an operator input, never read from the petition.
 A petition that could name its own sandbox account would decide sec. 7.3 for

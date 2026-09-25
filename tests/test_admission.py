@@ -99,7 +99,7 @@ class AdmissionResourceScopeTests(unittest.TestCase):
                 self.assertEqual(outcome.reason, RefusalReason.MALFORMED_ARN)
 
     def test_accountless_arn_is_refused(self) -> None:
-        """sec. 7.3.1, sec. 3.5 — an empty account field cannot equal the sandbox."""
+        """sec. 7.3.3 — an empty account field cannot equal the sandbox."""
         outcome = admit(petition(resource_arns=("arn:aws:s3:::some-bucket",)), SANDBOX)
         self.assertIsInstance(outcome, Refusal)
         self.assertEqual(outcome.reason, RefusalReason.ARN_OUTSIDE_SANDBOX_ACCOUNT)
