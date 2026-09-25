@@ -109,13 +109,15 @@ set `attach_admin_policy = true`, apply, and wait again.
 ```bash
 aws securityhub get-findings $P \
   --filters '{"ResourceId":[{"Value":"<arn>","Comparison":"EQUALS"}],"RecordState":[{"Value":"ACTIVE","Comparison":"EQUALS"}]}' \
-  --query "Findings[?Compliance.SecurityControlId=='<control>'] | [0]" \
+  --query "Findings[?Compliance.SecurityControlId=='<control>'] | [0]" --output json \
   > ../../.capture/security-group-open-ingress.json
 ```
 
 Repeat for `s3-bucket-public.json`, `ebs-volume-unencrypted.json` and
 `iam-policy-admin-star.json`. The names matter:
-tests/test_injection_corpus.py and the corpus refer to them.
+tests/test_injection_corpus.py and the corpus refer to them. `--output json`
+is not optional: a profile defaulting to text or table would write something
+that only fails to parse after the sandbox is gone.
 
 **4. Capture the plan fixtures (sec. 5.3). Plan only, never apply.**
 
@@ -162,7 +164,9 @@ Destinations: `tests/fixtures/findings/` for the four findings,
 for the event. The tool replaces account IDs, key and unique IDs, routable IP
 addresses and emails. It refuses to write while any unrecognised 12-digit
 sequence remains. Then **read every output file**: the tool only finds what it
-was told to look for.
+was told to look for. Look in particular for an S3 `OwnerName`, Identity Center
+user IDs (UUIDs next to `identitystore`), and any display name. Handle each
+with `--replace`.
 
 **7. Verify offline.** No network, no credentials (sec. 5.5):
 
@@ -185,7 +189,15 @@ aws configservice describe-configuration-recorders $P                         # 
 aws securityhub describe-hub $P                                               # expect InvalidAccessException
 aws ec2 describe-instances --filters Name=tag:writ-capture,Values=phase-1 \
   Name=instance-state-name,Values=pending,running,stopping,stopped $P --query 'Reservations[]'  # expect []
+
+# IAM is global: the regional tagging query above never sees it. Each must be NoSuchEntity.
+aws iam get-policy --policy-arn arn:aws:iam::<sandbox-id>:policy/writ-capture-admin-star --profile writ-sandbox
+aws iam get-role --role-name writ-capture-admin-holder --profile writ-sandbox
+aws iam get-role --role-name writ-capture-config --profile writ-sandbox
 ```
+
+A surviving `writ-capture-admin-star` is a live `*` on `*` policy. Do not record
+A1.4 until all three return `NoSuchEntity`.
 
 **9. Record** the capture in docs/RUNBOOK.md under *Fixture capture*: date,
 control IDs captured, the plan and event files, the destroy verification
