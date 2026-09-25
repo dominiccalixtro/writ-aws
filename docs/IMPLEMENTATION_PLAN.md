@@ -69,6 +69,8 @@ ASFF finding (untrusted)
   (Phase 2: printed, never served)
 ```
 
+3.8.1. A refusal at schema validation (step 1 above; §6.5) is a decision under item 8 and SHALL be recorded like any other refusal. Every decision record SHALL identify the petition it decided by the SHA-256 digest of the petition's raw bytes, and SHALL NOT carry petition text a parse refusal could quote (§3.1). A decision record SHALL NOT replace the record of a different decision: a second petition for the same finding produces a second record, never an overwritten first.
+
 ## 4. Phase 0 — Account boundary and broker identity
 
 ### 4.1 Account topology

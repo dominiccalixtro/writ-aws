@@ -83,6 +83,10 @@ class RefusalReason(str, Enum):
     MALFORMED_ARN = "malformed_arn"
     PLAN_PROHIBITED_DELETE = "plan_prohibited_delete"
     PLAN_UNPARSEABLE = "plan_unparseable"
+    # sec. 3.8.1 — a refusal at schema validation (sec. 6.5). admit() never
+    # returns it: it takes a parsed Petition. writ.decisions records it for the
+    # PetitionError that stopped the petition before admit() was reached.
+    PETITION_UNPARSEABLE = "petition_unparseable"
 
 
 @dataclass(frozen=True)

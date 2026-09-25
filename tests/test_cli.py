@@ -7,6 +7,7 @@ test_no_socket_is_constructed below.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import tempfile
@@ -85,22 +86,69 @@ class CliTests(unittest.TestCase):
         self._run(*self._base_args(self._write_petition(actions=["s3:DeleteBucket"])))
         self.assertEqual(len(list(self.run_dir.iterdir())), 1)
 
-    def test_unparseable_petition_is_a_typed_message_not_a_traceback(self) -> None:
-        """sec. 6.5 — parsing is total."""
+    def test_unparseable_petition_is_a_recorded_refusal_not_a_traceback(self) -> None:
+        """sec. 6.5 — parsing is total; sec. 3.8.1 — and its refusal is recorded."""
         path = self.tmp / "petition.json"
         path.write_text("{not json", encoding="utf-8")
         code, out, err = self._run(*self._base_args(path))
-        self.assertEqual(code, EXIT_INPUT_ERROR)
+        self.assertEqual(code, EXIT_REFUSED)
         self.assertIn("refused at parse", err)
-        self.assertEqual(out, "")
-        self.assertFalse(self.run_dir.exists())
+        body = json.loads(out)
+        self.assertEqual(body["decision"], "refusal")
+        self.assertEqual(body["reason"], "petition_unparseable")
+        self.assertEqual(len(list(self.run_dir.iterdir())), 1)
 
     def test_non_utf8_petition_does_not_raise(self) -> None:
         path = self.tmp / "petition.json"
         path.write_bytes(b"\xff\xfe\x00garbage")
         code, _, err = self._run(*self._base_args(path))
-        self.assertEqual(code, EXIT_INPUT_ERROR)
+        self.assertEqual(code, EXIT_REFUSED)
         self.assertIn("writ:", err)
+
+    def test_prohibited_petition_leaves_a_record(self) -> None:
+        """sec. 3.8.1 — the refusals most worth auditing happen at parse.
+
+        A petition naming a role for the broker to assume (sec. 6.4) never
+        reaches admit(); before 3.8.1 it left no trace in the run directory.
+        """
+        role_arn = f"arn:aws:iam::{SANDBOX}:role/attacker"
+        path = self._write_petition(resource_arns=[role_arn])
+        code, out, _ = self._run(*self._base_args(path))
+        self.assertEqual(code, EXIT_REFUSED)
+        body = json.loads(out)
+        self.assertEqual(body["section"], "sec. 6.4")
+        self.assertNotIn(role_arn, out)
+
+    def test_record_names_the_petition_bytes(self) -> None:
+        """sec. 3.8.1 — the digest is of the exact bytes the broker read."""
+        path = self._write_petition()
+        _, out, _ = self._run(*self._base_args(path))
+        expected = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertEqual(json.loads(out)["petition_sha256"], expected)
+
+    def test_second_petition_for_a_finding_does_not_erase_the_first(self) -> None:
+        """sec. 3.8.1 — end to end: two refusals, one finding, two records."""
+        first = self._write_petition(resource_arns=[SANDBOX_ARN.replace(SANDBOX, SANDBOX[::-1])])
+        _, first_out, _ = self._run(*self._base_args(first))
+        second = self._write_petition(actions=["iam:AttachRolePolicy"])
+        _, second_out, _ = self._run(*self._base_args(second))
+        self.assertEqual(json.loads(first_out)["reason"], "arn_outside_sandbox_account")
+        self.assertEqual(json.loads(second_out)["reason"], "action_not_allowlisted")
+        recorded = sorted(p.read_text(encoding="utf-8") for p in self.run_dir.iterdir())
+        self.assertEqual(recorded, sorted([first_out, second_out]))
+
+    def test_unwritable_record_is_an_input_error_and_prints_no_decision(self) -> None:
+        """sec. 3.8 — an unrecorded decision is never reported as one."""
+        blocker = self.tmp / "not-a-dir"
+        blocker.write_text("", encoding="utf-8")
+        code, out, err = self._run(
+            "--petition", str(self._write_petition()),
+            "--sandbox-account-id", SANDBOX,
+            "--run-dir", str(blocker),
+        )
+        self.assertEqual(code, EXIT_INPUT_ERROR)
+        self.assertEqual(out, "")
+        self.assertIn("not recorded", err)
 
     def test_missing_file_is_reported(self) -> None:
         code, _, err = self._run(*self._base_args(self.tmp / "absent.json"))
@@ -152,6 +200,12 @@ class CliTests(unittest.TestCase):
         refused = self._write_petition(actions=["s3:DeleteBucket"])
         with mock.patch("socket.socket", side_effect=AssertionError("CLI opened a socket")):
             code, _, _ = self._run(*self._base_args(refused))
+        self.assertEqual(code, EXIT_REFUSED)
+
+        unparseable = self.tmp / "unparseable.json"
+        unparseable.write_bytes(b"{not json")
+        with mock.patch("socket.socket", side_effect=AssertionError("CLI opened a socket")):
+            code, _, _ = self._run(*self._base_args(unparseable))
         self.assertEqual(code, EXIT_REFUSED)
 
 
