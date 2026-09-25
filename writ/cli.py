@@ -18,10 +18,11 @@ itself, which is the check it is supposed to be measured against.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
 
-from writ.admission import admit
+from writ.admission import Refusal, admit
 from writ.decisions import record_decision
 from writ.petition import PetitionError, parse_petition
 from writ.writs import Writ
@@ -29,8 +30,8 @@ from writ.writs import Writ
 DEFAULT_RUN_DIR = Path(".runs")
 
 EXIT_ADMITTED = 0
-EXIT_REFUSED = 1
-EXIT_INPUT_ERROR = 2
+EXIT_REFUSED = 1  # admission refusals and parse refusals alike (sec. 3.8.1)
+EXIT_INPUT_ERROR = 2  # no decision: the petition was unreadable, or its record unwritable
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -68,20 +69,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"writ: cannot read {path}: {exc}", file=sys.stderr)
         return EXIT_INPUT_ERROR
 
+    # sec. 3.8.1 — every record names the petition it decided.
+    petition_sha256 = hashlib.sha256(raw).hexdigest()
+
     # sec. 6.5 — parsing is total: a typed PetitionError, never a traceback.
+    # sec. 3.8.1 — and a parse refusal is a decision, recorded like the rest.
+    outcome: Writ | Refusal | PetitionError
     try:
         petition = parse_petition(raw)
     except PetitionError as exc:
         print(f"writ: petition refused at parse: {exc}", file=sys.stderr)
-        return EXIT_INPUT_ERROR
-
-    outcome = admit(petition, args.sandbox_account_id)
+        outcome = exc
+    else:
+        outcome = admit(petition, args.sandbox_account_id)
 
     # sec. 3.8 — persisted before any subsequent step, printing included. What
     # reaches stdout is then the recorded bytes themselves, so what an operator
     # reads and what the record digests to cannot drift apart.
     try:
-        record_path = record_decision(outcome, args.run_dir)
+        record_path = record_decision(outcome, args.run_dir, petition_sha256=petition_sha256)
     except OSError as exc:
         print(f"writ: decision not recorded ({exc}); refusing to report it", file=sys.stderr)
         return EXIT_INPUT_ERROR
