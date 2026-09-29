@@ -11,10 +11,21 @@ anything in `writ/`, and cite it in docstrings the way existing modules do
 (`sec. 7.3`, `invariant I6`) — that citation style is how the code is reviewed
 against the contract.
 
-The repository is currently a **skeleton**: every function in `writ/` raises
-`NotImplementedError` with the section it owes, and 17 of 19 tests are
-`@unittest.skip`. Filling one in means implementing the contract section named
-in its skip reason, not inventing behavior.
+`writ/` is implemented through Phase 2 (sec. 6-7, 3.8.1): a petition is parsed,
+admitted or refused, and recorded, and no code path reaches AWS. Phase 0 is
+applied (A0.1-A0.4 satisfied, A0.5 partial; `docs/RUNBOOK.md`). Phase 1 tooling
+is ready but nothing has been captured. Of Phase 2's acceptance, A2.2 and A2.3
+wait on those captures, and A2.4 is verified by human review.
+
+Five tests skip, and each names what it waits on; do not unskip one by
+inventing behavior:
+
+- `tests/test_admission.py`, 1 test — the sec. 7.3 tag check, deferred to
+  Phase 3 (sec. 7.3.2) because it needs an AWS read.
+- `tests/test_injection_corpus.py`, 4 tests — the fixture-driven corpus run
+  (sec. 9.3, A2.2, A2.3 as amended). They skip until a finding is committed
+  under `tests/fixtures/findings/` (Phase 1, sec. 5); from then on a missing or
+  malformed fixture is an error, not a skip.
 
 ## Commands
 
@@ -23,8 +34,20 @@ python -m unittest discover -s tests -v        # full suite
 python -m unittest tests.test_admission -v     # one module
 python -m unittest tests.test_admission.AdmissionAllowlistTests.test_action_outside_allowlist_is_refused
 python -m pip install -e .                     # installs the `writ` console script
-writ --finding tests/fixtures/<name>.json      # CLI; exits 2 until sec. 6-7 land
+writ --petition <file> --sandbox-account-id <12 digits> [--run-dir .runs]   # admit or refuse one petition
+python -m tools.redact_fixture --account <real>=123456789012 <raw> <fixture>   # redact a capture (sec. 5.4)
 ```
+
+`writ` prints the decision record it just persisted. Exit codes: 0 writ, 1
+refusal (parse refusals included, sec. 3.8.1), 2 no decision (unreadable
+petition file, or record not written; argparse usage errors also exit 2).
+`--finding` is a hidden alias for `--petition` (A2.3). The sandbox account ID is
+an operator input, never read from the petition (sec. 7.3.1).
+
+`tools.redact_fixture` runs on the operator's machine between capture and
+commit. Raw captures go in gitignored `.capture/`; only its output is committed,
+under `tests/fixtures/`. It refuses to write (exit 1) while any 12-digit
+sequence remains that is not an allowed placeholder; exit 2 is bad input.
 
 No third-party test dependency and no test runner beyond stdlib `unittest`
 (sec. 9.1). No runtime dependencies at all — `pyproject.toml` declares
@@ -44,25 +67,61 @@ raw bytes ──parse_petition──▶ Petition ──admit──▶ Writ | Ref
  (petition.py)                          (admission.py)  (writs.py)      (decisions.py)
 ```
 
-- `petition.py` — parsing is **total**: any input, including non-UTF-8 bytes and
-  adversarially nested JSON, either yields a `Petition` or raises `PetitionError`.
-  Unknown top-level keys, embedded credentials, role ARNs, or broker-directed
-  instructions are rejected *here*, not downstream (sec. 6.4).
+- `petition.py` — parsing is **total** (sec. 6.5): any input, including non-UTF-8
+  bytes and adversarially nested JSON, either yields a `Petition` or raises
+  `PetitionError`. Bounded (64 KiB, 32 levels); duplicate keys refused. Unknown
+  top-level keys, credential-shaped keys, and role ARNs or policy documents in
+  the structural fields are rejected *here*, not downstream (sec. 6.1, 6.4).
+  Broker-directed instructions have no field to live in (closed schema); there
+  is deliberately no content scanner, and none should be added (module docstring).
 - `admission.py` — the only place a `Petition` may become a `Writ` or `Refusal`.
   Deterministic, deny-by-default, no model call ever (I2). Checks run in a fixed
-  order: allowlist → resource scope → terraform plan gate → blast-radius
-  classification. It returns `Refusal` for bad petitions; it does not raise.
+  order: allowlist (sec. 7.1-7.2) → account scope (sec. 7.3.1; the tag check is
+  deferred, 7.3.2; an ARN with no account field, such as S3's, is refused,
+  7.3.3) → terraform plan gate (sec. 7.4), after which any diff petition is
+  refused (7.4.1) → blast-radius band (sec. 7.5-7.6). It returns a `Refusal`
+  with a typed `RefusalReason` for bad petitions; it does not raise. The sandbox
+  account ID is an argument, never a petition field. `ACTION_BANDS` is the one
+  table (sec. 7.5) and `ALLOWED_ACTIONS` derives from it; today it holds one
+  action, `ec2:RevokeSecurityGroupIngress`, banded `auto`. `DELETABLE_RESOURCE_TYPES`
+  is empty, so every planned delete refuses (sec. 7.4).
 - `writs.py` — construction only. `MAX_TERM_SECONDS = 900` is a ceiling, never
-  configurable upward (I7). Scope may only *narrow* from the petition (sec. 3.6).
-- `decisions.py` — every outcome, admitted or refused, is persisted before any
-  next step. Write with `newline=""` so digests stay stable across platforms
-  (sec. 7.8).
-- `cli.py` — fixture in, printed writ or refusal out. Never a network call.
+  configurable upward (I7); 900 is also the sole legal term (sec. 7.7), so
+  `term_seconds` is not a constructor argument. Scope may only *narrow* from the
+  petition (sec. 3.6); in Phase 2 it is the petition's own actions and ARNs, and
+  the intersection with the capability role's permissions is Phase 3.
+- `decisions.py` — every outcome (writ, refusal, or parse refusal) is persisted
+  before any next step (sec. 3.8). `RECORD_VERSION` is 2. A record is bound to
+  `petition_sha256` (SHA-256 of the petition's raw bytes) and
+  `sandbox_account_id`, and carries no timestamp. The filename carries a digest
+  of the record's own bytes, and a record never replaces a different one: it is
+  written to a temp file and `os.link`ed into place, and a different record
+  already at the name raises `FileExistsError` (sec. 3.8.1). Write with
+  `newline=""` so digests stay stable across platforms (sec. 7.8). A parse
+  refusal is recorded with the digest and the sec. clause only, never the
+  petition text (sec. 3.8.1).
+- `cli.py` — petition in, the persisted decision record out. Never a network
+  call. The record is written before anything is printed.
 
-`terraform/bootstrap/` and `tests/fixtures/` are deliberately empty. Bootstrap
-needs a live AWS Organization to plan against; fixtures require a live sandbox
-account to capture from and are then replayed forever. Neither is created
-casually, and neither is exercised by the suite.
+Beside the pipeline, not part of it:
+
+- `tools/redact_fixture.py` — the sec. 5.4 redactor. Stdlib only, offline. It
+  imports `ACCOUNT_ID_PATTERN` and `ALLOWED_ACCOUNT_PLACEHOLDERS` from
+  `tests/test_redaction.py`, so the tool and the test cannot disagree.
+- `terraform/bootstrap/` — the Phase 0 broker identity (sec. 4), applied.
+  Not exercised by the suite. Its state is local and gitignored: do not
+  validate an alternative var file in that directory, because a plan against
+  placeholder accounts proposes rewriting the live quash SCP (`docs/RUNBOOK.md`,
+  A0.2). Details in its README.
+- `terraform/capture/` — the Phase 1 capture module (sec. 5): drafted, not yet
+  applied. It creates deliberately insecure resources for one capture window and
+  is destroyed straight after (sec. 5.1); procedure and teardown checks are in
+  its README. Applying it is a live AWS action.
+- `tests/fixtures/` — a README and `injection/corpus.json`, the sec. 9.3.1
+  injection corpus. The corpus is authored, not captured: its petitions take
+  every identifier from the finding they answer, so it carries none of its own.
+  The captured findings, plans, and CloudTrail event are still pending
+  (Phase 1); the paths the corpus refers to are listed in the fixtures README.
 
 ## Constraints that shape every change
 
