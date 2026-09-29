@@ -85,3 +85,17 @@ casually, and neither is exercised by the suite.
 - **`sentinelcloud-engineering-loop` is out of scope** (sec. 1.2). Reuse the
   design discipline; copy source deliberately with in-file attribution; never
   import across repositories.
+
+## Working agreement
+
+- **Decisions: go with the recommendation.** When a choice has to be made, lay
+  out the options briefly, give one recommendation, and proceed with it — the
+  operator has pre-approved going with the recommendation. Say which option was
+  taken, and why, in the commit message. A decision that changes the contract
+  is made by amending `docs/IMPLEMENTATION_PLAN.md` with a numbered sub-clause
+  (the way 7.3.1 was added), in the same change. This covers design and
+  implementation choices only: live AWS actions, anything that spends money,
+  force-pushes, and deleting branches or history still need an explicit yes.
+- **Authorship.** Commit as `Angel Dominic Kynnt Calixtro <dominic.calixtro@gmail.com>`.
+  No `Co-Authored-By` or `Claude-Session` trailers, and no "Generated with
+  Claude Code" lines, in commits or pull request descriptions.
