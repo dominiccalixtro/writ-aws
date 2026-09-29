@@ -94,6 +94,9 @@ class RefusalReason(str, Enum):
     # returns it: it takes a parsed Petition. writ.decisions records it for the
     # PetitionError that stopped the petition before admit() was reached.
     PETITION_UNPARSEABLE = "petition_unparseable"
+    # sec. 7.4.1 — a Terraform-diff petition that passed the sec. 7.4 gate. In
+    # Phases 0-2 no diff petition is admitted: see admit().
+    PLAN_SCOPE_UNDEFINED = "plan_scope_undefined"
 
 
 @dataclass(frozen=True)
@@ -112,7 +115,8 @@ def admit(petition: Petition, sandbox_account_id: str) -> Writ | Refusal:
     writ.petition.parse_petition; this function performs, in order:
       1. static action allowlist check (sec. 7.1-7.2)
       2. resource-scope check: sandbox account + sandbox tag (sec. 7.3)
-      3. terraform plan gate, when the petition proposes a diff (sec. 7.4)
+      3. terraform plan gate, when the petition proposes a diff (sec. 7.4),
+         after which a diff petition is refused regardless (sec. 7.4.1)
       4. blast-radius classification (sec. 7.5-7.6)
     Every path returns Writ or Refusal — never raises for a bad petition.
     """
@@ -139,6 +143,15 @@ def admit(petition: Petition, sandbox_account_id: str) -> Writ | Refusal:
         refusal_reason = _plan_refusal(petition.terraform_diff)
         if refusal_reason is not None:
             return Refusal(petition.finding_id, refusal_reason, "sec. 7.4")
+        # sec. 7.4.1 — passing the gate is not admission. The plan is the
+        # petition's own account of a change, written by the agent plane;
+        # nothing here produced or verified it, so a band read from it could
+        # not carry sec. 7.6, and it cannot supply the scope sec. 7.7 requires.
+        # The gate runs first so a destructive plan still refuses under its
+        # more specific reason.
+        return Refusal(
+            petition.finding_id, RefusalReason.PLAN_SCOPE_UNDEFINED, "sec. 7.4.1"
+        )
 
     # 4 — blast radius (sec. 7.5-7.6, invariant I6).
     band = classify_band(petition.actions)
@@ -163,6 +176,12 @@ def classify_band(actions: tuple[str, ...]) -> Band:
     outcome. `human` always wins: §7.6 overrides the §7.5 table and is not
     configurable.
     """
+    # sec. 3.5 — an empty action set has proved nothing safe. The parser
+    # never yields one (sec. 6.2) and diff petitions refuse before banding
+    # (sec. 7.4.1); this keeps any future path from inheriting `auto` by
+    # having nothing to check.
+    if not actions:
+        return Band.HUMAN
     for action in actions:
         if action.startswith(ALWAYS_HUMAN_PREFIXES):
             return Band.HUMAN

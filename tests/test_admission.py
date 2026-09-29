@@ -8,6 +8,7 @@ cannot pass by refusing for the wrong cause.
 
 from __future__ import annotations
 
+import json
 import unittest
 from unittest import mock
 
@@ -22,7 +23,7 @@ from writ.admission import (
     classify_band,
     validate_action_bands,
 )
-from writ.petition import Petition
+from writ.petition import SCHEMA_VERSION, Petition, parse_petition
 from writ.writs import Writ
 
 SANDBOX = "123456789012"
@@ -38,11 +39,16 @@ SANDBOX_ARN = f"arn:aws:ec2:ap-southeast-1:{SANDBOX}:security-group/sg-012345678
 
 def petition(
     *,
-    actions: tuple[str, ...] = (ALLOWED_ACTION,),
+    actions: tuple[str, ...] | None = None,
     resource_arns: tuple[str, ...] = (SANDBOX_ARN,),
     terraform_diff: str | None = None,
     finding_id: str = "finding-1",
 ) -> Petition:
+    # The shapes parse_petition produces (sec. 6.2): a diff petition carries no
+    # actions. Defaulting an allowlisted action onto a diff petition built one
+    # the parser never would, and hid a crash on the real shape for a release.
+    if actions is None:
+        actions = () if terraform_diff is not None else (ALLOWED_ACTION,)
     return Petition(
         finding_id=finding_id,
         actions=actions,
@@ -198,11 +204,54 @@ class AdmissionPlanGateTests(unittest.TestCase):
                 self.assertIsInstance(outcome, Refusal)
                 self.assertEqual(outcome.reason, RefusalReason.PLAN_UNPARSEABLE)
 
-    def test_update_only_plan_passes_the_gate(self) -> None:
+    def test_gate_passing_plan_is_still_refused(self) -> None:
+        """sec. 7.4.1 — passing the gate is not admission in Phases 0-2.
+
+        The reason distinguishes it from the gate's own refusals: this plan got
+        through sec. 7.4 and was refused afterwards.
+        """
         outcome = admit(
             petition(terraform_diff=self._plan("update", "aws_security_group")), SANDBOX
         )
-        self.assertIsInstance(outcome, Writ)
+        self.assertIsInstance(outcome, Refusal)
+        self.assertEqual(outcome.reason, RefusalReason.PLAN_SCOPE_UNDEFINED)
+        self.assertEqual(outcome.section, "sec. 7.4.1")
+
+    def test_plan_that_disables_cloudtrail_or_attaches_iam_is_never_admitted(self) -> None:
+        """sec. 7.4.1, invariant I6 — through the parser, as the agent plane sends it.
+
+        Both plans pass the sec. 7.4 gate: an in-place update and a create
+        delete nothing. Before 7.4.1 the first crashed admit(), and patching
+        the crash naively would have banded it `auto` — the action set of a
+        diff petition is empty, and an empty set checked nothing.
+        """
+        for action, resource_type in (
+            ("update", "aws_cloudtrail"),
+            ("create", "aws_iam_user_policy_attachment"),
+        ):
+            with self.subTest(resource_type=resource_type):
+                raw = json.dumps({
+                    "schema_version": SCHEMA_VERSION,
+                    "finding_id": "finding-1",
+                    "terraform_diff": self._plan(action, resource_type),
+                    "resource_arns": [SANDBOX_ARN],
+                    "rationale": "in-place update; deletes nothing",
+                }).encode()
+                outcome = admit(parse_petition(raw), SANDBOX)
+                self.assertIsInstance(outcome, Refusal)
+                self.assertEqual(outcome.reason, RefusalReason.PLAN_SCOPE_UNDEFINED)
+
+    def test_diff_petition_carrying_allowlisted_actions_is_still_refused(self) -> None:
+        """sec. 7.4.1 — a shape the parser forbids (sec. 6.2) gains nothing."""
+        outcome = admit(
+            petition(
+                actions=(ALLOWED_ACTION,),
+                terraform_diff=self._plan("update", "aws_security_group"),
+            ),
+            SANDBOX,
+        )
+        self.assertIsInstance(outcome, Refusal)
+        self.assertEqual(outcome.reason, RefusalReason.PLAN_SCOPE_UNDEFINED)
 
 
 class AdmissionClassificationTests(unittest.TestCase):
@@ -245,6 +294,10 @@ class AdmissionClassificationTests(unittest.TestCase):
 
     def test_allowlisted_auto_action_bands_auto(self) -> None:
         self.assertIs(classify_band((ALLOWED_ACTION,)), Band.AUTO)
+
+    def test_empty_action_set_bands_human(self) -> None:
+        """sec. 3.5 — having nothing to check is not having checked it."""
+        self.assertIs(classify_band(()), Band.HUMAN)
 
     def test_writ_term_never_exceeds_900_seconds(self) -> None:
         """invariant I7."""

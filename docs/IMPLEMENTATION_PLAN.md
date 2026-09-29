@@ -156,6 +156,8 @@ ASFF finding (untrusted)
 
 7.4. Petitions proposing a Terraform diff SHALL be gated on `terraform plan -json`. A plan containing any `delete` action on a resource type outside the explicitly enumerated deletable set SHALL cause refusal.
 
+7.4.1. In Phases 0–2 a petition proposing a Terraform diff SHALL be refused after the §7.4 gate, whatever the gate's outcome. The plan is supplied by the petition — that is, by the agent plane — and the broker has neither produced nor verified it, so it is a claim about a change rather than evidence of one: no band derived from it can carry §7.6, and it cannot establish the scope §7.7 requires a writ to record. The gate still runs first, so a destructive plan refuses under the more specific §7.4 reason. Admitting diff petitions requires the broker to produce or verify the plan itself, and is deferred to Phase 3.
+
 7.5. Admitted petitions SHALL be classified by blast radius into `auto` and `human` bands. The banding rule SHALL be data, not code branches, and SHALL be independently reviewable.
 
 7.6. Any petition touching IAM, CloudTrail, KMS key policy, or the Organization SHALL classify as `human` regardless of other signals. This classification SHALL NOT be overridable by configuration.

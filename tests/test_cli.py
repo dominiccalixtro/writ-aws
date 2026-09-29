@@ -166,6 +166,30 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, EXIT_REFUSED)
         self.assertEqual(json.loads(out)["reason"], "arn_outside_sandbox_account")
 
+    def test_diff_petition_is_a_recorded_refusal_not_a_traceback(self) -> None:
+        """sec. 7.4.1, 3.8 — before 7.4.1 a gate-passing diff crashed the CLI.
+
+        The traceback exited 1, the same code as a refusal, with no record.
+        """
+        plan = (
+            '{"type":"planned_change","change":{"resource":'
+            '{"resource_type":"aws_security_group"},"action":"update"}}\n'
+        )
+        path = self.tmp / "petition.json"
+        document = {
+            "schema_version": petition_module.SCHEMA_VERSION,
+            "finding_id": "finding-0001",
+            "terraform_diff": plan,
+            "resource_arns": [SANDBOX_ARN],
+            "rationale": "remove the open ingress rule",
+        }
+        path.write_text(json.dumps(document), encoding="utf-8")
+        code, out, _ = self._run(*self._base_args(path))
+        self.assertEqual(code, EXIT_REFUSED)
+        body = json.loads(out)
+        self.assertEqual(body["reason"], "plan_scope_undefined")
+        self.assertEqual(len(list(self.run_dir.iterdir())), 1)
+
     def test_record_names_the_sandbox(self) -> None:
         _, out, _ = self._run(*self._base_args(self._write_petition()))
         self.assertEqual(json.loads(out)["sandbox_account_id"], SANDBOX)
